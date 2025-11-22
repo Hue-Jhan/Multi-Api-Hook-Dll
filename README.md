@@ -1,5 +1,5 @@
-# Windows Api Hook Dll
-Simple DLL that Hooks windows api functions through minhook and warns you about possible malicious code.
+# Multi Api Hook Dll
+DLL that Hooks WinApi and Native api functions through minhook and warns you about possible malicious code.
 
 # ⚓ Hooks
 
