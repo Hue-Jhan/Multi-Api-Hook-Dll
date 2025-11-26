@@ -1,7 +1,7 @@
 # Multi Api Hook Dll
 Simple Antivirus DLL that when injected into a malware will hook WinApi and Native api functions through minhook, track suspicious patterns and stops potentially malicious code. 
 
-Successfully detects most of my malware, such as [this], [this], this, but because it operates at usermode level it cannot detect syscall injections.
+Successfully detects most of my malware, such as [this](), [this](), [this](), but because it operates at usermode level it cannot detect syscall injections.
 
 # ⚓ Hooks
 
@@ -14,7 +14,6 @@ b
 # 👾 Malware Detection
 
 Succesfully stops almost all my malware, here is the list of patterns currently detected:
-
 
 - **Thread Hijacking**: VirtualAlloc(Ex) + VirtualWrite/Memcpy/WriteProcessMem + RWX + Hijacking: to make the shellcode execute it tracks PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY, PAGE_EXECUTE, PAGE_EXECUTE_READ via VirtualProtect(Ex). The hijacking part is simple, the code will enumerate to find an existing thread in the target process, then it will suspend it, change its RIP to the shellcode and resume it.
 
