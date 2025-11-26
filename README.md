@@ -1,17 +1,17 @@
 # Multi Api Hook Dll
 Simple Antivirus DLL that when injected into a malware will hook WinApi and Native api functions through minhook, track suspicious patterns and stops potentially malicious code. 
 
-Successfully detects most of my malware: .. .. .. It operates at usermode lvl so it won't detect injections using syscalls or kernel level stuff ofc.
+Successfully detects most of my malware, such as [this], [this], this, but because it operates at usermode level it cannot detect syscall injections.
 
 # ⚓ Hooks
 
-b
+a
 
 # 💻 Code
 
 b
 
-# 🕷 👾 Malware Detection
+# 👾 Malware Detection
 
 Succesfully stops almost all my malware, here is the list of patterns currently detected:
 
@@ -28,8 +28,10 @@ Succesfully stops almost all my malware, here is the list of patterns currently 
 
 - **Callback exploit**: work in progress...
 
-The DLL also hooks the respective Ntdll functions of many Windows Api functions, which means that even native api malwares are detected. In the examples above i did not include all the functions that 
-System calls are not detected because they bypass user mode level hooks.
+The DLL also hooks the respective Ntdll functions of many Windows Api procedures, which means that even malwares that use native api are detected. 
 
+In the examples above i did not include all the functions for a given action, for example when a program copies memory it might use VirtualWriteMemory, Memcopy, WriteProcessMemory, but i did not list all the function possible for "copying memory", the same thing applies for creating or suspending threads, changing memory protections, etc. For a full list check out the contents of the functions in ```nt_hooks.cpp```, where the majority of the detection part takes place.
+
+System calls are not detected because they bypass libraries or function as well as almost any usermode hooks, you could potentially track raw syscalls in the stack but idk, maybe in the future i will create a full kernel mode Edr...
 
 
