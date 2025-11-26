@@ -2,11 +2,18 @@
 #include <iostream>
 #include <Windows.h>
 #include <cstring>
+#include <cinttypes>
 #define PID_COLUMN 48
 #define FOREGROUND_LIGHT_BLUE (FOREGROUND_BLUE | FOREGROUND_INTENSITY)
 #define FOREGROUND_RED1 (FOREGROUND_RED | FOREGROUND_INTENSITY)
 #define FOREGROUND_YELLOW1 (FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY)
 #define FOREGROUND_PURPLE1 (FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY)
+#ifndef PAGE_NOCACHE
+    #define PAGE_NOCACHE 0x200
+#endif
+#ifndef PAGE_WRITECOMBINE
+    #define PAGE_WRITECOMBINE 0x400
+#endif
 #define TRY_MH(call, name) \
     if ((call) != MH_OK) std::fprintf(stderr, "[!] MinHook error on %s\n", name);
 
@@ -51,6 +58,7 @@ struct SuppressNtLoggingGuard {
 void cambiaColore(int colore);
 bool ShouldIgnoreAllocation(SIZE_T size, void* caller);
 bool IsRWX(DWORD protection);
+std::string ProtectionToString(DWORD protection);
 void PushRWXEvent(const char* func, LPVOID addr, SIZE_T size, DWORD prot, void* retAddr);
 void PushDLLInjectionEvent(const char* api, HMODULE mod, const char* name);
 void PushInjectionEvent(const char* func, LPVOID addr, SIZE_T size, DWORD prot, void* retAddr);
