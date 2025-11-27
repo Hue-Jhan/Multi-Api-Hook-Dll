@@ -1,7 +1,7 @@
 # Multi Api Hook Dll
-Simple Antivirus DLL that when injected into a malware will hook WinApi and Native api functions through minhook, track suspicious patterns and stops potentially malicious code. 
+Simple Antivirus DLL that when injected into a malware will hook WinApi and Native api functions through minhook, track suspicious patterns and stop potentially malicious code. 
 
-Successfully detects most of my malware, such as [this](), [this](), [this](), but because it operates at usermode level it cannot detect syscall injections.
+Successfully detects most of my malware, such as [this](), [this](), [this](), and [this](), but because it operates at usermode level it cannot detect syscall injections.
 
 # ⚓ Hooks
 
