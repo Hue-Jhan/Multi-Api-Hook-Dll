@@ -2,146 +2,205 @@
 #include "hook_stuff.h"
 #include "nt_hooks.h"
 
-void SetupHook(LPCSTR mod, LPCSTR funcName, void** originalPtr, void* detour) {
-    HMODULE h = GetModuleHandleA(mod);
-    if (!h) {
-        std::fprintf(stderr, "[!] cannot getmodule %s\n", mod);
+
+bool EnsureConsole() {
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (h != INVALID_HANDLE_VALUE && h != nullptr && GetConsoleScreenBufferInfo(h, &csbi)) { return true; }
+    if (!AttachConsole(ATTACH_PARENT_PROCESS)) {  // try to attach to parent console first 
+        if (!AllocConsole()) {
+            DWORD e = GetLastError();
+            char buf[128];
+            _snprintf_s(buf, sizeof(buf), _TRUNCATE, "EnsureConsole: AllocConsole failed: %lu\n", e);
+            OutputDebugStringA(buf);
+            return false; } 
+    }
+    FILE* fOut = nullptr;  // redirect CRT streams to console
+    FILE* fErr = nullptr;
+    freopen_s(&fOut, "CONOUT$", "w", stdout);
+    freopen_s(&fErr, "CONOUT$", "w", stderr);
+    freopen_s(&fOut, "CONIN$", "r", stdin);
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+    return true;
+}
+
+bool ResizeConsoleShort(int width, int height) {
+    if (width <= 0 || height <= 0) return false;
+    if (!EnsureConsole()) return false;
+
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (h == INVALID_HANDLE_VALUE || h == nullptr) return false;
+
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (!GetConsoleScreenBufferInfo(h, &csbi)) return false;
+
+    COORD largest = GetLargestConsoleWindowSize(h);
+    if (width > largest.X) width = largest.X;
+    if (height > largest.Y) height = largest.Y;
+
+    SMALL_RECT newWindow;
+    newWindow.Left = 0;
+    newWindow.Top = 0;
+    newWindow.Right = (SHORT)(width - 1);
+    newWindow.Bottom = (SHORT)(height - 1);
+
+    COORD newBuf;  // buffer is taller than the window so scrolling is enabled
+    newBuf.X = (SHORT)width;
+    SHORT desiredBufY = (SHORT)max((int)height + 100, (int)height + 1);
+    if (csbi.dwSize.Y > desiredBufY) desiredBufY = csbi.dwSize.Y;
+    newBuf.Y = desiredBufY;
+
+    // if buffer must grow to fit the window, grow it first
+    if (csbi.dwSize.X < newBuf.X || csbi.dwSize.Y < newBuf.Y) {
+        if (!SetConsoleScreenBufferSize(h, newBuf)) return false;
+        if (!SetConsoleWindowInfo(h, TRUE, &newWindow)) return false;
+    } else {   // window must be shrunk first so buffer can shrink safely
+        SMALL_RECT curWindow = csbi.srWindow;
+        if ((curWindow.Right - curWindow.Left + 1) > newBuf.X || (curWindow.Bottom - curWindow.Top + 1) > newBuf.Y) {
+            SMALL_RECT tmp = { 0, 0, 0, 0 };
+            if (!SetConsoleWindowInfo(h, TRUE, &tmp)) return false;
+            if (!GetConsoleScreenBufferInfo(h, &csbi)) return false; 
+        }
+        if (!SetConsoleScreenBufferSize(h, newBuf)) return false;
+        if (!SetConsoleWindowInfo(h, TRUE, &newWindow)) return false;
+    }
+
+    return true;
+}
+
+void SetupHook(HMODULE hModule, LPCSTR funcName, void** originalPtr, void* detour) {
+    if (!hModule) {
+        std::fprintf(stderr, "[!] null module handle\n");
         return; }
-    void* target = (void*)GetProcAddress(h, funcName);
+
+    void* target = (void*)GetProcAddress(hModule, funcName);
     if (!target) {
-        std::fprintf(stderr, "[!] cannot getproc %s!%s\n", mod, funcName);
-        return;
-    } if (MH_CreateHook(target, detour, originalPtr) != MH_OK) {
-        std::fprintf(stderr, "[!] MH_CreateHook failed for %s!%s\n", mod, funcName);
-        return;
-    } if (MH_EnableHook(target) != MH_OK) {
-        std::fprintf(stderr, "[!] MH_EnableHook failed for %s!%s\n", mod, funcName);
+        std::fprintf(stderr, "[!] cannot getproc %p!%s\n", hModule, funcName);
+        return; }
+    if (MH_CreateHook(target, detour, originalPtr) != MH_OK) {
+        std::fprintf(stderr, "[!] MH_CreateHook failed for %p!%s\n", hModule, funcName);
+        return; }
+    if (MH_EnableHook(target) != MH_OK) {
+        std::fprintf(stderr, "[!] MH_EnableHook failed for %p!%s\n", hModule, funcName);
         return; }
 }
 
 DWORD WINAPI Init(LPVOID) {
-    if (AllocConsole()) {
-        FILE* fpOut = nullptr;
-        FILE* fpErr = nullptr;
-        freopen_s(&fpOut, "CONOUT$", "w", stdout);
-        freopen_s(&fpErr, "CONOUT$", "w", stderr);
-        setvbuf(stdout, NULL, _IONBF, 0);
-        setvbuf(stderr, NULL, _IONBF, 0); }
+    if (!EnsureConsole()) {
+        OutputDebugStringA("Init: EnsureConsole failed\n");
+        return 0; }
 
     if (MH_Initialize() != MH_OK) {
         std::fprintf(stderr, "[!] MH_Initialize failed\n");
         return 0; }
+
+    if (!ResizeConsoleShort(150, 40)) printf("resize failed\n");
     cambiaColore(FOREGROUND_GREEN);
-    printf("\n");
     
-    /*HMODULE k = GetModuleHandleA("kernel32.dll");
-    if (!k) {
-        std::fprintf(stderr, "[!] cannot getmodule %s\n", "Kernel32.dll");
+    HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
+    HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
+    if (!hKernel32 || !hNtdll) {
+        std::fprintf(stderr, "[!] cannot getmodule kernel32.dll\n");
+        std::fprintf(stderr, "[!] cannot getmodule ntdll.dll\n");
         return 0; }
 
-    HMODULE n = GetModuleHandleA("ntdll.dll");
-    if (!n) {
-        std::fprintf(stderr, "[!] cannot getmodule %s\n", "Ntdll.dll");
-        return 0; }
-
-    HMODULE u = GetModuleHandleA("user32.dll");
-    if (!u) {
-        std::fprintf(stderr, "[!] cannot getmodule %s\n", "user32.dll");
-        return 0; }
-
-    HMODULE a = GetModuleHandleA("advapi32.dll");
-    if (!a) {
-        std::fprintf(stderr, "[!] cannot getmodule %s\n", "Advapi32.dll");
-        return 0; }*/
-
-    SetupHook("kernel32.dll", "LoadLibraryA", (void**)&fpLoadLibraryA, hkLoadLibraryA);
-    SetupHook("kernel32.dll", "LoadLibraryW", (void**)&fpLoadLibraryW, hkLoadLibraryW);
-    SetupHook("kernel32.dll", "LoadLibraryExA", (void**)&fpLoadLibraryExA, hkLoadLibraryExA);
-    SetupHook("kernel32.dll", "LoadLibraryExW", (void**)&fpLoadLibraryExW, hkLoadLibraryExW);
-    SetupHook("kernel32.dll", "GetProcAddress", (void**)&fpGetProcAddress, hkGetProcAddress);
-    SetupHook("kernel32.dll", "CreateThread", (void**)&fpCreateThread, hkCreateThread);
-    SetupHook("kernel32.dll", "CreateRemoteThread", (void**)&fpCreateRemoteThread, hkCreateRemoteThread);
-    SetupHook("kernel32.dll", "CreateRemoteThreadEx", (void**)&fpCreateRemoteThreadEx, hkCreateRemoteThreadEx);
-    SetupHook("kernel32.dll", "VirtualAlloc", (void**)&fpVirtualAlloc, hkVirtualAlloc);
-    SetupHook("kernel32.dll", "VirtualAllocEx", (void**)&fpVirtualAllocEx, hkVirtualAllocEx);
-    SetupHook("kernel32.dll", "WriteProcessMemory", (void**)&fpWriteProcessMemory, hkWriteProcessMemory);
-    SetupHook("kernel32.dll", "VirtualProtect", (void**)&fpVirtualProtect, hkVirtualProtect);
-    SetupHook("kernel32.dll", "VirtualProtectEx", (void**)&fpVirtualProtectEx, hkVirtualProtectEx);   
-    SetupHook("kernel32.dll", "SuspendThread", (void**)&fpSuspendThread, hkSuspendThread);
-    SetupHook("kernel32.dll", "ResumeThread", (void**)&fpResumeThread, hkResumeThread);
-    SetupHook("kernel32.dll", "GetThreadContext", (void**)&fpGetThreadContext, hkGetThreadContext);
-    SetupHook("kernel32.dll", "SetThreadContext", (void**)&fpSetThreadContext, hkSetThreadContext);
-    SetupHook("kernel32.dll", "OpenProcess", (void**)&fpOpenProcess, hkOpenProcess);
-    SetupHook("kernel32.dll", "CloseHandle", (void**)&fpCloseHandle, hkCloseHandle);
-    SetupHook("kernel32.dll", "QueueUserAPC", (void**)&fpQueueUserAPC, hkQueueUserAPC);
-    SetupHook("kernel32.dll", "GetModuleHandleW", (void**)&fpGetModuleHandleW, hkGetModuleHandleW);
-    SetupHook("kernel32.dll", "WaitForSingleObject", (void**)&fpWaitForSingleObject, hkWaitForSingleObject);
-    SetupHook("kernel32.dll", "CreateToolhelp32Snapshot", (void**)&fpCreateToolhelp32Snapshot, hkCreateToolhelp32Snapshot);
-    //SetupHook("kernel32.dll", "Process32First", (void**)&fpProcess32FirstA, hkProcess32FirstA);
-    //SetupHook("kernel32.dll", "Process32Next", (void**)&fpProcess32NextA, hkProcess32NextA);
-    //SetupHook("kernel32.dll", "Process32FirstW", (void**)&fpProcess32FirstW, hkProcess32FirstW);
-    //SetupHook("kernel32.dll", "Process32NextW", (void**)&fpProcess32NextW, hkProcess32NextW); SetupHook("kernel32.dll", "GetProcessId", (void**)&fpGetProcessId, hkGetProcessId);
-    //SetupHook("kernel32.dll", "GetModuleFileNameA", (void**)&fpGetModuleFileNameA, hkGetModuleFileNameA);
-    //SetupHook("kernel32.dll", "GetModuleFileNameW", (void**)&fpGetModuleFileNameW, hkGetModuleFileNameW);
-
-    //SetupHook("user32.dll", "SetWindowsHookExA", (void**)&fpSetWindowsHookExA, hkSetWindowsHookExA);
-    //SetupHook("user32.dll", "SetWindowsHookExW", (void**)&fpSetWindowsHookExW, hkSetWindowsHookExW);
-    //SetupHook("user32.dll", "SetWinEventHook", (void**)&fpSetWinEventHook, hkSetWinEventHook);
-    SetupHook("kernel32.dll", "CreateFileA", (void**)&fpCreateFileA, hkCreateFileA);
-    SetupHook("kernel32.dll", "CreateFileW", (void**)&fpCreateFileW, hkCreateFileW);
-    SetupHook("kernel32.dll", "WriteFile", (void**)&fpWriteFile, hkWriteFile);
-    SetupHook("kernel32.dll", "CreateFileMappingA", (void**)&fpCreateFileMappingA, hkCreateFileMappingA);
-    SetupHook("kernel32.dll", "CreateFileMappingW", (void**)&fpCreateFileMappingW, hkCreateFileMappingW);
-    SetupHook("kernel32.dll", "MapViewOfFile", (void**)&fpMapViewOfFile, hkMapViewOfFile);
-    /*SetupHook("advapi32.dll", "RegSetValueExA", (void**)&fpRegSetValueExA, hkRegSetValueExA);
-    SetupHook("advapi32.dll", "RegSetValueExW", (void**)&fpRegSetValueExW, hkRegSetValueExW);
-    SetupHook("advapi32.dll", "RegCreateKeyExA", (void**)&fpRegCreateKeyExA, hkRegCreateKeyExA);
-    SetupHook("advapi32.dll", "RegCreateKeyExW", (void**)&fpRegCreateKeyExW, hkRegCreateKeyExW);
-    SetupHook("advapi32.dll", "CreateServiceA", (void**)&fpCreateServiceA, hkCreateServiceA);
-    SetupHook("advapi32.dll", "CreateServiceW", (void**)&fpCreateServiceW, hkCreateServiceW);
-    SetupHook("advapi32.dll", "StartServiceA", (void**)&fpStartServiceA, hkStartServiceA);
-    SetupHook("advapi32.dll", "StartServiceW", (void**)&fpStartServiceW, hkStartServiceW);*/
-    SetupHook("kernel32.dll", "DuplicateHandle", (void**)&fpDuplicateHandle, hkDuplicateHandle);
-    SetupHook("kernel32.dll", "CreateNamedPipeA", (void**)&fpCreateNamedPipeA, hkCreateNamedPipeA);
-    SetupHook("kernel32.dll", "CreateNamedPipeW", (void**)&fpCreateNamedPipeW, hkCreateNamedPipeW);
-    SetupHook("kernel32.dll", "ConnectNamedPipe", (void**)&fpConnectNamedPipe, hkConnectNamedPipe);
-    SetupHook("kernel32.dll", "OpenMutexA", (void**)&fpOpenMutexA, hkOpenMutexA);
-    SetupHook("kernel32.dll", "OpenMutexW", (void**)&fpOpenMutexW, hkOpenMutexW);
-    SetupHook("kernel32.dll", "CreateMutexA", (void**)&fpCreateMutexA, hkCreateMutexA);
-    SetupHook("kernel32.dll", "CreateMutexW", (void**)&fpCreateMutexW, hkCreateMutexW);
+    HMODULE hAdvapi = GetModuleHandleA("advapi32.dll");
+    HMODULE hUser32 = GetModuleHandleA("user32.dll");
+    if (!hAdvapi || !hUser32) {
+        std::fprintf(stderr, "[!] cannot getmodule advapi32.dll\n");
+        std::fprintf(stderr, "[!] cannot getmodule user32.dll\n");
+        // return 0;  // no return bc some apps dont even call these
+    }
 
 
-    //SetupHook("ntdll.dll", "NtClose", (void**)&NtClose, hkNtClose);
-    SetupHook("ntdll.dll", "NtOpenProcess", (void**)&NtOpenProcess, hkNtOpenProcess);
-    SetupHook("ntdll.dll", "NtOpenThread", (void**)&NtOpenThread, hkNtOpenThread);
-    SetupHook("ntdll.dll", "NtAllocateVirtualMemory", (void**)&NtAllocateVirtualMemory, hkNtAllocateVirtualMemory);
-    SetupHook("ntdll.dll", "NtProtectVirtualMemory", (void**)&NtProtectVirtualMemory, hkNtProtectVirtualMemory);
-    SetupHook("ntdll.dll", "NtWriteVirtualMemory", (void**)&NtWriteVirtualMemory, hkNtWriteVirtualMemory);
-    SetupHook("ntdll.dll", "NtCreateThreadEx", (void**)&NtCreateThreadEx, hkNtCreateThreadEx);
-    SetupHook("ntdll.dll", "NtCreateThread", (void**)&NtCreateThread, hkNtCreateThread);
-    SetupHook("ntdll.dll", "NtWaitForSingleObject", (void**)&NtWaitForSingleObject, hkNtWaitForSingleObject);
-    // SetupHook("ntdll.dll", "NtFreeVirtualMemory", (void**)&NtFreeVirtualMemory, hkNtFreeVirtualMemory);
-    SetupHook("ntdll.dll", "NtSuspendThread", (void**)&NtSuspendThread, hkNtSuspendThread);
-    SetupHook("ntdll.dll", "NtResumeThread", (void**)&NtResumeThread, hkNtResumeThread);
-    SetupHook("ntdll.dll", "NtGetContextThread", (void**)&NtGetContextThread, hkNtGetContextThread);
-    SetupHook("ntdll.dll", "NtSetContextThread", (void**)&NtSetContextThread, hkNtSetContextThread);
-    SetupHook("ntdll.dll", "NtQuerySystemInformation", (void**)&NtQuerySystemInformation, hkNtQuerySystemInformation);
-    SetupHook("ntdll.dll", "NtQueryInformationProcess", (void**)&NtQueryInformationProcess, hkNtQueryInformationProcess);
-    SetupHook("ntdll.dll", "NtQueryInformationThread", (void**)&NtQueryInformationThread, hkNtQueryInformationThread);
-    /*SetupHook("ntdll.dll", "NtReadVirtualMemory", (void**)&NtReadVirtualMemory, hkNtReadVirtualMemory);
-    SetupHook("ntdll.dll", "NtQueryVirtualMemory", (void**)&NtQueryVirtualMemory, hkNtQueryVirtualMemory);
-    SetupHook("ntdll.dll", "NtQueryObject", (void**)&NtQueryObject, hkNtQueryObject);
-    SetupHook("ntdll.dll", "NtOpenSection", (void**)&NtOpenSection, hkNtOpenSection);
-    SetupHook("ntdll.dll", "NtMapViewOfSection", (void**)&NtMapViewOfSection, hkNtMapViewOfSection);
-    SetupHook("ntdll.dll", "NtUnmapViewOfSection", (void**)&NtUnmapViewOfSection, hkNtUnmapViewOfSection);
-    SetupHook("ntdll.dll", "NtQueryInformationFile", (void**)&NtQueryInformationFile, hkNtQueryInformationFile);
-    */SetupHook("ntdll.dll", "NtSetInformationThread", (void**)&NtSetInformationThread, hkNtSetInformationThread);
-    SetupHook("ntdll.dll", "NtSetInformationProcess", (void**)&NtSetInformationProcess, hkNtSetInformationProcess);
-    //SetupHook("ntdll.dll", "LdrLoadDll", (void**)&fpLdrLoadDll, hkLdrLoadDll);
-    SetupHook("ntdll.dll", "NtCreateFile", (void**)&NtCreateFile, hkNtCreateFile);
-    SetupHook("ntdll.dll", "NtOpenFile", (void**)&NtOpenFile, hkNtOpenFile);
-    SetupHook("ntdll.dll", "NtQueueApcThread", (void**)&NtQueueApcThread, hkNtQueueApcThread);
+    SetupHook(hKernel32, "LoadLibraryA", (void**)&fpLoadLibraryA, hkLoadLibraryA);
+    SetupHook(hKernel32, "LoadLibraryW", (void**)&fpLoadLibraryW, hkLoadLibraryW);
+    SetupHook(hKernel32, "LoadLibraryExA", (void**)&fpLoadLibraryExA, hkLoadLibraryExA);
+    SetupHook(hKernel32, "LoadLibraryExW", (void**)&fpLoadLibraryExW, hkLoadLibraryExW);
+    SetupHook(hKernel32, "GetProcAddress", (void**)&fpGetProcAddress, hkGetProcAddress);
+    SetupHook(hKernel32, "CreateThread", (void**)&fpCreateThread, hkCreateThread);
+    SetupHook(hKernel32, "CreateRemoteThread", (void**)&fpCreateRemoteThread, hkCreateRemoteThread);
+    SetupHook(hKernel32, "CreateRemoteThreadEx", (void**)&fpCreateRemoteThreadEx, hkCreateRemoteThreadEx);
+    SetupHook(hKernel32, "VirtualAlloc", (void**)&fpVirtualAlloc, hkVirtualAlloc);
+    SetupHook(hKernel32, "VirtualAllocEx", (void**)&fpVirtualAllocEx, hkVirtualAllocEx);
+    SetupHook(hKernel32, "WriteProcessMemory", (void**)&fpWriteProcessMemory, hkWriteProcessMemory);
+    SetupHook(hKernel32, "VirtualProtect", (void**)&fpVirtualProtect, hkVirtualProtect);
+    SetupHook(hKernel32, "VirtualProtectEx", (void**)&fpVirtualProtectEx, hkVirtualProtectEx);
+    SetupHook(hKernel32, "SuspendThread", (void**)&fpSuspendThread, hkSuspendThread);
+    SetupHook(hKernel32, "ResumeThread", (void**)&fpResumeThread, hkResumeThread);
+    SetupHook(hKernel32, "GetThreadContext", (void**)&fpGetThreadContext, hkGetThreadContext);
+    SetupHook(hKernel32, "SetThreadContext", (void**)&fpSetThreadContext, hkSetThreadContext);
+    SetupHook(hKernel32, "OpenProcess", (void**)&fpOpenProcess, hkOpenProcess);
+    SetupHook(hKernel32, "CloseHandle", (void**)&fpCloseHandle, hkCloseHandle);
+    SetupHook(hKernel32, "QueueUserAPC", (void**)&fpQueueUserAPC, hkQueueUserAPC);
+    SetupHook(hKernel32, "GetModuleHandleW", (void**)&fpGetModuleHandleW, hkGetModuleHandleW);
+    SetupHook(hKernel32, "WaitForSingleObject", (void**)&fpWaitForSingleObject, hkWaitForSingleObject);
+    SetupHook(hKernel32, "CreateToolhelp32Snapshot", (void**)&fpCreateToolhelp32Snapshot, hkCreateToolhelp32Snapshot);
+    SetupHook(hKernel32, "CreateFileA", (void**)&fpCreateFileA, hkCreateFileA);
+    SetupHook(hKernel32, "CreateFileW", (void**)&fpCreateFileW, hkCreateFileW);
+    SetupHook(hKernel32, "WriteFile", (void**)&fpWriteFile, hkWriteFile);
+    SetupHook(hKernel32, "CreateFileMappingA", (void**)&fpCreateFileMappingA, hkCreateFileMappingA);
+    SetupHook(hKernel32, "CreateFileMappingW", (void**)&fpCreateFileMappingW, hkCreateFileMappingW);
+    SetupHook(hKernel32, "MapViewOfFile", (void**)&fpMapViewOfFile, hkMapViewOfFile);
+    SetupHook(hKernel32, "DuplicateHandle", (void**)&fpDuplicateHandle, hkDuplicateHandle);
+    SetupHook(hKernel32, "CreateNamedPipeA", (void**)&fpCreateNamedPipeA, hkCreateNamedPipeA);
+    SetupHook(hKernel32, "CreateNamedPipeW", (void**)&fpCreateNamedPipeW, hkCreateNamedPipeW);
+    SetupHook(hKernel32, "ConnectNamedPipe", (void**)&fpConnectNamedPipe, hkConnectNamedPipe);
+    SetupHook(hKernel32, "OpenMutexA", (void**)&fpOpenMutexA, hkOpenMutexA);
+    SetupHook(hKernel32, "OpenMutexW", (void**)&fpOpenMutexW, hkOpenMutexW);
+    SetupHook(hKernel32, "CreateMutexA", (void**)&fpCreateMutexA, hkCreateMutexA);
+    SetupHook(hKernel32, "CreateMutexW", (void**)&fpCreateMutexW, hkCreateMutexW);
+    //SetupHook(hKernel32, "Process32First", (void**)&fpProcess32FirstA, hkProcess32FirstA);
+    //SetupHook(hKernel32, "Process32Next", (void**)&fpProcess32NextA, hkProcess32NextA);
+    //SetupHook(hKernel32, "Process32FirstW", (void**)&fpProcess32FirstW, hkProcess32FirstW);
+    //SetupHook(hKernel32, "Process32NextW", (void**)&fpProcess32NextW, hkProcess32NextW); SetupHook("kernel32.dll", "GetProcessId", (void**)&fpGetProcessId, hkGetProcessId);
+    //SetupHook(hKernel32, "GetModuleFileNameA", (void**)&fpGetModuleFileNameA, hkGetModuleFileNameA);
+    //SetupHook(hKernel32, "GetModuleFileNameW", (void**)&fpGetModuleFileNameW, hkGetModuleFileNameW);
 
+    /*SetupHook(hUser32, "SetWindowsHookExA", (void**)&fpSetWindowsHookExA, hkSetWindowsHookExA);
+    SetupHook(hUser32, "SetWindowsHookExW", (void**)&fpSetWindowsHookExW, hkSetWindowsHookExW);
+    SetupHook(hUser32, "SetWinEventHook", (void**)&fpSetWinEventHook, hkSetWinEventHook);
+    SetupHook(hAdvapi, "RegSetValueExA", (void**)&fpRegSetValueExA, hkRegSetValueExA);
+    SetupHook(hAdvapi, "RegSetValueExW", (void**)&fpRegSetValueExW, hkRegSetValueExW);
+    SetupHook(hAdvapi, "RegCreateKeyExA", (void**)&fpRegCreateKeyExA, hkRegCreateKeyExA);
+    SetupHook(hAdvapi, "RegCreateKeyExW", (void**)&fpRegCreateKeyExW, hkRegCreateKeyExW);
+    SetupHook(hAdvapi, "CreateServiceA", (void**)&fpCreateServiceA, hkCreateServiceA);
+    SetupHook(hAdvapi, "CreateServiceW", (void**)&fpCreateServiceW, hkCreateServiceW);
+    SetupHook(hAdvapi, "StartServiceA", (void**)&fpStartServiceA, hkStartServiceA);
+    SetupHook(hAdvapi, "StartServiceW", (void**)&fpStartServiceW, hkStartServiceW);*/
+    
+
+    // SetupHook(hNtdll, "NtClose", (void**)&NtClose, hkNtClose);
+    SetupHook(hNtdll, "NtOpenProcess", (void**)&NtOpenProcess, hkNtOpenProcess);
+    SetupHook(hNtdll, "NtOpenThread", (void**)&NtOpenThread, hkNtOpenThread);
+    SetupHook(hNtdll, "NtAllocateVirtualMemory", (void**)&NtAllocateVirtualMemory, hkNtAllocateVirtualMemory);
+    SetupHook(hNtdll, "NtProtectVirtualMemory", (void**)&NtProtectVirtualMemory, hkNtProtectVirtualMemory);
+    SetupHook(hNtdll, "NtWriteVirtualMemory", (void**)&NtWriteVirtualMemory, hkNtWriteVirtualMemory);
+    SetupHook(hNtdll, "NtCreateThreadEx", (void**)&NtCreateThreadEx, hkNtCreateThreadEx);
+    SetupHook(hNtdll, "NtCreateThread", (void**)&NtCreateThread, hkNtCreateThread);
+    SetupHook(hNtdll, "NtWaitForSingleObject", (void**)&NtWaitForSingleObject, hkNtWaitForSingleObject);
+    // SetupHook(hNtdll, "NtFreeVirtualMemory", (void**)&NtFreeVirtualMemory, hkNtFreeVirtualMemory);
+    SetupHook(hNtdll, "NtSuspendThread", (void**)&NtSuspendThread, hkNtSuspendThread);
+    SetupHook(hNtdll, "NtResumeThread", (void**)&NtResumeThread, hkNtResumeThread);
+    SetupHook(hNtdll, "NtGetContextThread", (void**)&NtGetContextThread, hkNtGetContextThread);
+    SetupHook(hNtdll, "NtSetContextThread", (void**)&NtSetContextThread, hkNtSetContextThread);
+    SetupHook(hNtdll, "NtQuerySystemInformation", (void**)&NtQuerySystemInformation, hkNtQuerySystemInformation);
+    SetupHook(hNtdll, "NtQueryInformationProcess", (void**)&NtQueryInformationProcess, hkNtQueryInformationProcess);
+    SetupHook(hNtdll, "NtQueryInformationThread", (void**)&NtQueryInformationThread, hkNtQueryInformationThread);
+    SetupHook(hNtdll, "NtSetInformationThread", (void**)&NtSetInformationThread, hkNtSetInformationThread);
+    SetupHook(hNtdll, "NtSetInformationProcess", (void**)&NtSetInformationProcess, hkNtSetInformationProcess);
+    SetupHook(hNtdll, "NtReadVirtualMemory", (void**)&NtReadVirtualMemory, hkNtReadVirtualMemory);
+    /*SetupHook(hNtdll, "NtQueryVirtualMemory", (void**)&NtQueryVirtualMemory, hkNtQueryVirtualMemory);
+    SetupHook(hNtdll, "NtQueryObject", (void**)&NtQueryObject, hkNtQueryObject);
+    SetupHook(hNtdll, "NtOpenSection", (void**)&NtOpenSection, hkNtOpenSection);
+    SetupHook(hNtdll, "NtMapViewOfSection", (void**)&NtMapViewOfSection, hkNtMapViewOfSection);
+    SetupHook(hNtdll, "NtUnmapViewOfSection", (void**)&NtUnmapViewOfSection, hkNtUnmapViewOfSection);
+    SetupHook(hNtdll, "NtQueryInformationFile", (void**)&NtQueryInformationFile, hkNtQueryInformationFile);
+    SetupHook(hNtdll, "LdrLoadDll", (void**)&fpLdrLoadDll, hkLdrLoadDll); */
+    SetupHook(hNtdll, "NtCreateFile", (void**)&NtCreateFile, hkNtCreateFile);
+    SetupHook(hNtdll, "NtOpenFile", (void**)&NtOpenFile, hkNtOpenFile);
+    SetupHook(hNtdll, "NtQueueApcThread", (void**)&NtQueueApcThread, hkNtQueueApcThread);
 
     std::printf("[-] WinAPI monitoring hooks installed \n\n");
     g_enableLogging = true;
