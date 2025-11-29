@@ -1,7 +1,7 @@
 # Multi Api Hook Dll
 Simple Antivirus DLL that when injected into a malware will hook WinApi and Native api functions through minook, track suspicious patterns and stop potentially malicious code; currently focused on Windows x64. 
 
-Successfully detects most of my malware, such as [this](), [this](), [this](), and [this](), but because it operates at usermode it cannot detect syscall injections, raw syscall tracking would require kernel-mode instrumentation which i cant do.
+Successfully detects most of my malware, such as [this](https://github.com/Hue-Jhan/Self-Injection-Reverse-Shell-Undetected), [this](https://github.com/Hue-Jhan/Encrypted-Trojan-Undetected), [this](https://github.com/Hue-Jhan/Local-Process-injection-Trojan), [this](https://github.com/Hue-Jhan/Remote-Dll-injector-Trojan), [this](https://github.com/Hue-Jhan/Ntdll-Process-inj-Trojan), [this](https://github.com/Hue-Jhan/Thread-Hijacking-Collection), [this](https://github.com/Hue-Jhan/Ntdll-Dll-Injection-Trojan) and [this](https://github.com/Hue-Jhan/Ntdll-Thread-Hijacking-trojan), but because it operates at usermode it cannot detect syscall injections (like [this](https://github.com/Hue-Jhan/Direct-Syscall-Process-Injection-Trojan) or [this](https://github.com/Hue-Jhan/Direct-Syscall-Dll-Injection)) since raw syscall tracking would require kernel-mode instrumentation which i cant do.
 
 1. [⚓ Hooks explained](#hooks)
 2. [💻 Code](#code)
@@ -20,9 +20,10 @@ Successfully detects most of my malware, such as [this](), [this](), [this](), a
 
 # ⚓ Hooks
 
-Hooks basically allow the DLL to intercept calls before the target function executes, when a hooked API is called, control is redirected to a custom detour function, which can inspect arguments, analyze behavior, log events, or block execution. Specifically, MinHook performs inline hooking by rewriting the first bytes of a target function with a jump instruction (trampoline). The original bytes are preserved in a function so the hook can safely pass execution back to the real API after processing.
+Hooks basically allow the DLL to intercept calls before the target function executes, when a hooked API is called, control is redirected to a custom detour function, which can inspect arguments, analyze behavior, log events, or block execution. Specifically, MinHook performs inline hooking by rewriting the first bytes of a target function with a jump instruction (trampoline). The original bytes are preserved in a function so the hook can safely pass execution back to the real API after processing. <img align="right" src="media/huk-hijak-cr0.png" width="300" />
 
 This DLL applies hooks with minhook to a wide range of functions at both the WinAPI and their Native API (Nt/Zw) counterpart (E.g VirtualAlloc -> NtAllocateVirtualMemory), including but not limited to:
+
 
 - Memory allocation: VirtualAlloc, VirtualAllocEx, VirtualProtect, VirtualProtectEx;
   
@@ -33,6 +34,8 @@ This DLL applies hooks with minhook to a wide range of functions at both the Win
 - Module/Dll loading: LoadLibraryA/W, LdrLoadDll, GetProcAddress, Manual Mapping;
 
 - File manipulation: CreateFileA/W, and more, useful in case a dll/persistence file is dropped;
+
+<img align="right" src="media/huk-hijak-cr1.png" width="300" />
   
 - And many more, for the full list check out ```nt_hooks.cpp``` and ```hook_stuff.cpp```.
   
@@ -53,7 +56,7 @@ This project includes not only the hook dll, but also a starter file and some ma
 
 ### 📕 How to use
 
-Here's how to use the tools once you compile them:
+Here's how to use the tools once you compile the starter and the hook (with [minhook VC17](https://github.com/TsudaKageyu/minhook/tree/master/build) library in a ```lib``` folder):
 
 1) Use the ```starter.exe``` file to start a malware as a suspended process with ```./starter.exe malware.exe```, do not close the console;
 2) Inject the Dll into the malware and wait until all the hooks are placed (couple of seconds);
