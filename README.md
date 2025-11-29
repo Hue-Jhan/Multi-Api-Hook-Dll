@@ -83,12 +83,14 @@ The code for the hook is divided into these sections. The 2 images below are an 
   
 - ```nt_hooks.cpp / nt_hooks.h```: Contains the hooks for Ntdll/WinAPI functions, the majority of the detection logic resides here.
 
-- ```detection.cpp / detection.h```: This is the core detection engine, contains the functions that monitor memory protections, RWX or suspicious executable regions, thread hijacking attempts and injection chains.
+- ```detection.cpp / detection.h```: This is the core detection engine, contains the functions that monitor memory protections, RWX or suspicious executable regions, thread hijacking attempts and injection chains.  <img align="right" src="media/huk-nt-hijak-find.png" width="350" />
 
-- ```log_stuff.cpp / log_stuff.h```: utility functions, logging helpers (LOGFUNC, Push...Event), color coded console output, timestamp helpers, and bounded memory copies for safe logging of suspicious buffers (mostly shellcode). <img align="right" src="media/huk-nt-hijak-find.png" width="350" />
+- ```log_stuff.cpp / log_stuff.h```: utility functions, logging helpers (LOGFUNC, Push...Event), color coded console output, timestamp helpers, and bounded memory copies for safe logging of suspicious buffers (mostly shellcode).
 
 #### Malware Samples
-In the release i also included some malware samples you can try, they are completely harmless shellcode injectors that use various techniques to target notepad and spawn a message box that says "xd". If you do not trust the samples you can find the code for them on my profile in the Malware Dev section, i included: Thread Hijacking (4 versions), Process injection (3 verions), Dll injection (2 versions). In the future i will add more samples that include methodes queue Apc, callback exploiting, and more.
+In the release i also included some malware samples you can try, they are completely harmless shellcode injectors that use various techniques to target notepad and spawn a message saying "xd". If you do not trust the samples you can find the code for them on my profile in the Malware Dev section, i included: Thread Hijacking (4 versions), Process injection (3 verions), Dll injection (2 versions). As you can see on the right, the hook succesfully detects my Native Api thread-hijacking remote-process shellcode-injector trojan, the shellcode is for a msgbox.
+
+In the future i will add more samples that include methodes queue Apc, callback exploiting, and more.
 
 </a>
 
@@ -121,7 +123,7 @@ Succesfully stops almost all my malware, here is the list of patterns currently 
 
 - **Memory injection**: VirtualAlloc(Ex) + VirtualWrite/Memcpy/WriteProcessMem + RWX + CreateThread(Ex): Same as before but the program directly creates a thread in the target process that points to the previously allocated shellcode, or it may create a suspended one that points to a dummy function, then change its RIP and resume it instantly. 
 
-- **DLL Injection**: VirtualAlloc(Ex) + VirtualWrite/Memcpy/WriteProcessMem/Manual + GetModuleHandleW + GetProcAddr(loading function) or LoadLibrary(A/W/ExA/ExW)/LdrLoadLibrary/Manual Mapping + CreateThread(Ex): If the program starts a thread with a StartRoutine in a known library (kernel32 for LoadLibrary, ntdll for LdrLoadLib), or with an Argument that looks like a dll, or in a previously tracked memory, the dll will flag this pattern, analyze it and stop it if necessary. (example in the image on the right). <img align="right" src="media/huk-injector-loadlib.png" width="380" />
+- **DLL Injection**: VirtualAlloc(Ex) + VirtualWrite/Memcpy/WriteProcessMem/Manual + GetModuleHandleW + GetProcAddr(loading function) or LoadLibrary(A/W/ExA/ExW)/LdrLoadLibrary/Manual Mapping + CreateThread(Ex): If the program starts a thread with a StartRoutine in a known library (kernel32 for LoadLibrary, ntdll for LdrLoadLib), or with an Argument that looks like a dll, or in a previously tracked memory, the dll will flag this pattern, analyze it and stop it if necessary. (example in the image below). <img align="right" src="media/huk-injector-loadlib.png" width="380" />
 
 - **DLL Hijacking**: work in progress, i will update this after i created a good dll hijacker..... 
 
