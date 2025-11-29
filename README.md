@@ -20,7 +20,7 @@ Successfully detects most of my malware, such as [this](https://github.com/Hue-J
 
 # ⚓ Hooks
 
-Hooks basically allow the DLL to intercept calls before the target function executes, when a hooked API is called, control is redirected to a custom detour function, which can inspect arguments, analyze behavior, log events, or block execution. Specifically, MinHook performs inline hooking by rewriting the first bytes of a target function with a jump instruction (trampoline). The original bytes are preserved in a function so the hook can safely pass execution back to the real API after processing. Example of detecting [this](https://github.com/Hue-Jhan/Thread-Hijacking-Collection/tree/main/2_Create_Hijack) ---> <img align="right" src="media/huk-hijak-cr0.png" width="300" />
+Hooks basically allow the DLL to intercept calls before the target function executes, when a hooked API is called, control is redirected to a custom detour function, which can inspect arguments, analyze behavior, log events, or block execution. Specifically, MinHook performs inline hooking by rewriting the first bytes of a target function with a jump instruction (trampoline). The original bytes are preserved in a function so the hook can safely pass execution back to the real API after processing. Here's an example of detecting [this](https://github.com/Hue-Jhan/Thread-Hijacking-Collection/tree/main/2_Create_Hijack) ---> <img align="right" src="media/huk-hijak-cr0.png" width="310" />
 
 This DLL applies hooks with minhook to a wide range of functions at both the WinAPI and their Native API (Nt/Zw) counterpart (E.g VirtualAlloc -> NtAllocateVirtualMemory), including but not limited to:
 
@@ -31,7 +31,7 @@ This DLL applies hooks with minhook to a wide range of functions at both the Win
   
 - Threading: CreateThread, CreateRemoteThread, NtResumeThread, NtSetContextThread, SuspendThread;
   
-- Module/Dll loading: LoadLibraryA/W, LdrLoadDll, GetProcAddress, Manual Mapping; <img align="right" src="media/huk-hijak-cr1.png" width="300" />
+- Module/Dll loading: LoadLibraryA/W, LdrLoadDll, GetProcAddress, Manual Mapping; <img align="right" src="media/huk-hijak-cr1.png" width="310" />
 
 - File manipulation: CreateFileA/W, and more, useful in case a dll/persistence file is dropped;
 
@@ -73,9 +73,9 @@ If you want to hook a DLL you can too, the ```dll-inj-xd.exe``` or whatever i na
 The starter file is a very simple executable that given an executable it will start it as a suspended process, then by pressing enter the process will resume. In my opinion this starter file is fundamental to properly hook all functions before execution and to avoid race conditions. You can try to hook the malware while it's running but it might crash or simply already have done some damage.
 
 #### Hook Dll
-The code for the hook is divided into several sections:
+The code for the hook is divided into these sections. The 2 images below are an example of the hook detecting [this](https://github.com/Hue-Jhan/Ntdll-Thread-Hijacking-trojan).
 
-<img align="right" src="media/huk-nt-hijak-find2.png" width="450" />
+<img align="right" src="media/huk-nt-hijak-find2.png" width="500" />
 
 - ```dll_main.cpp```: entry point and hook installer using MinHook, installs all hooks when the DLL is injected and resizes console;
 
@@ -85,9 +85,9 @@ The code for the hook is divided into several sections:
 
 - ```detection.cpp / detection.h```: This is the core detection engine, contains the functions that monitor memory protections, RWX or suspicious executable regions, thread hijacking attempts and injection chains.
 
-- ```log_stuff.cpp / log_stuff.h```: utility functions, logging helpers (LOGFUNC, Push...Event), color coded console output, timestamp helpers, and bounded memory copies for safe logging of suspicious buffers (mostly shellcode).
+- ```log_stuff.cpp / log_stuff.h```: utility functions, logging helpers (LOGFUNC, Push...Event), color coded console output, timestamp helpers, and bounded memory copies for safe logging of suspicious buffers (mostly shellcode). <img align="right" src="media/huk-nt-hijak-find.png" width="350" />
 
-#### Malware Samples <img align="right" src="media/huk-nt-hijak-find.png" width="350" />
+#### Malware Samples
 In the release i also included some malware samples you can try, they are completely harmless shellcode injectors that use various techniques to target notepad and spawn a message box that says "xd". If you do not trust the samples you can find the code for them on my profile in the Malware Dev section, i included: Thread Hijacking (4 versions), Process injection (3 verions), Dll injection (2 versions). In the future i will add more samples that include methodes queue Apc, callback exploiting, and more.
 
 </a>
@@ -121,11 +121,9 @@ Succesfully stops almost all my malware, here is the list of patterns currently 
 
 - **Memory injection**: VirtualAlloc(Ex) + VirtualWrite/Memcpy/WriteProcessMem + RWX + CreateThread(Ex): Same as before but the program directly creates a thread in the target process that points to the previously allocated shellcode, or it may create a suspended one that points to a dummy function, then change its RIP and resume it instantly. 
 
-- **DLL Injection**: VirtualAlloc(Ex) + VirtualWrite/Memcpy/WriteProcessMem/Manual + GetModuleHandleW + GetProcAddr(loading function) or LoadLibrary(A/W/ExA/ExW)/LdrLoadLibrary/Manual Mapping + CreateThread(Ex): If the program starts a thread with a StartRoutine in a known library (kernel32 for LoadLibrary, ntdll for LdrLoadLib), or with an Argument that looks like a dll, or in a previously tracked memory, the dll will flag this pattern, analyze it and stop it if necessary.
+- **DLL Injection**: VirtualAlloc(Ex) + VirtualWrite/Memcpy/WriteProcessMem/Manual + GetModuleHandleW + GetProcAddr(loading function) or LoadLibrary(A/W/ExA/ExW)/LdrLoadLibrary/Manual Mapping + CreateThread(Ex): If the program starts a thread with a StartRoutine in a known library (kernel32 for LoadLibrary, ntdll for LdrLoadLib), or with an Argument that looks like a dll, or in a previously tracked memory, the dll will flag this pattern, analyze it and stop it if necessary. (example in the image on the right). <img align="right" src="media/huk-injector-loadlib.png" width="380" />
 
 - **DLL Hijacking**: work in progress, i will update this after i created a good dll hijacker..... 
-
-<img align="right" src="media/huk-injector-loadlib.png" width="350" />
 
 - **Queue APC Thread**: work in progress, same thing....
 
