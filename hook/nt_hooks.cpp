@@ -186,7 +186,7 @@ NTSTATUS NTAPI hkNtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAcces
             }
         } else {    // then it might be inside an executable region of the target that matches a tracked allocation, manual mapping
             AllocInfo ai;
-            printf("weird\n");
+            // printf("weird\n");
             if (find_alloc_for_addr((uintptr_t)StartRoutine, &ai, targetPid)) {
                 uint64_t now = GetTickCount64();
                 if (ai.written && ai.madeExecutable && (now - ai.ts) <= DETECTION_WINDOW_MS) {
