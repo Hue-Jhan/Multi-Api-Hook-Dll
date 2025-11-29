@@ -69,10 +69,10 @@ Most malware in their initial stage act as remote process injectors, they target
 
 If you want to hook a DLL you can too, the ```dll-inj-xd.exe``` or whatever i named it is a simple remote dll injector that uses LoadLibraryA to inject a dll that acts as a self injector, targeting the process it's being loaded into to inject shellcode and pop up a msgbox. In order to hook it you must first spawn the malware as suspended, then spawn the targetes process (notepad), hook it with procHacker, then hook the injector too (in case you wanna hook them both), and resume it. The hook dll will recognize and stop the injector first (but you can choose not to stop the execution), then it will stop the malicious dll inside notepad, you can choose not to stop the injection here too.
 
-#### Starter File  <img align="right" src="media/huk-nt-hijak-find2.png" width="450" />
+#### Starter File 
 The starter file is a very simple executable that given an executable it will start it as a suspended process, then by pressing enter the process will resume. In my opinion this starter file is fundamental to properly hook all functions before execution and to avoid race conditions. You can try to hook the malware while it's running but it might crash or simply already have done some damage.
 
-#### Hook Dll
+#### Hook Dll <img align="right" src="media/huk-nt-hijak-find2.png" width="450" />
 The code for the hook is divided into several sections:
 
 - dll_main.cpp: entry point and hook installer using MinHook, installs all hooks when the DLL is injected and resizes console;
@@ -85,9 +85,7 @@ The code for the hook is divided into several sections:
 
 - log_stuff.cpp / log_stuff.h: utility functions, logging helpers (LOGFUNC, Push...Event), color coded console output, timestamp helpers, and bounded memory copies for safe logging of suspicious buffers (mostly shellcode).
 
-<img align="right" src="media/huk-nt-hijak-find.png" width="300" />
-
-#### Malware Samples 
+#### Malware Samples <img align="right" src="media/huk-nt-hijak-find.png" width="350" />
 In the release i also included some malware samples you can try, they are completely harmless shellcode injectors that use various techniques to target notepad and spawn a message box that says "xd". If you do not trust the samples you can find the code for them on my profile in the Malware Dev section, i included: Thread Hijacking (4 versions), Process injection (3 verions), Dll injection (2 versions). In the future i will add more samples that include methodes queue Apc, callback exploiting, and more.
 
 </a>
