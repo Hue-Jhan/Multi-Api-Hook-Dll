@@ -3,11 +3,22 @@ Simple Antivirus DLL that when injected into a malware will hook WinApi and Nati
 
 Successfully detects most of my malware, such as [this](), [this](), [this](), and [this](), but because it operates at usermode it cannot detect syscall injections, raw syscall tracking would require kernel-mode instrumentation which i cant do.
 
-1. [Hooks explained](#1-hooks)
-2. [Code](#2-code)
+1. [⚓ Hooks explained](#hooks)
+2. [💻 Code](#code)
+   
+   2.1 [Project Structure](#Howto)
+   
+   2.2 [In Depth Explanation](#expl)
+   
+4. [👾 Malware Detection](#malw)
 
-⚓
-# 1. Hooks
+
+
+<a name="hooks">
+
+
+
+# ⚓ Hooks
 
 Hooks basically allow the DLL to intercept calls before the target function executes, when a hooked API is called, control is redirected to a custom detour function, which can inspect arguments, analyze behavior, log events, or block execution. Specifically, MinHook performs inline hooking by rewriting the first bytes of a target function with a jump instruction (trampoline). The original bytes are preserved in a function so the hook can safely pass execution back to the real API after processing.
 
@@ -27,10 +38,18 @@ This DLL applies hooks with minhook to a wide range of functions at both the Win
   
 Each nt hook also logs function parameters, memory addresses, and patterns such as RWX allocations, thread hijacking, and remote module injection. Some hooks also **block** execution if malicious behavior is detected, dump the memory region of the alleged payload and prompt the user with a simple question: "Do you want to block the execution?", if the answer is no, the malware will go on, else it will stop (and most likely crash or end execution). 
 
-💻
-# 2. Code
+</a>
+
+
+
+<a name="code">
+
+# 💻 Code
 
 This project includes not only the hook dll, but also a starter file and some malware samples you can try.
+
+
+<a name="Howto">
 
 ### 2.1 How to use
 
@@ -67,11 +86,26 @@ The code for the hook is divided into several sections:
 #### Malware Samples
 In the release i also included some malware samples you can try, they are completely harmless shellcode injectors that use various techniques to target notepad and spawn a message box that says "xd". If you do not trust the samples you can find the code for them on my profile in the Malware Dev section, i included: Thread Hijacking (4 versions), Process injection (3 verions), Dll injection (2 versions). In the future i will add more samples that include methodes queue Apc, callback exploiting, and more.
 
+</a>
+
+
+
+<a name="expl">
+  
 ### 2.2 Code in details
 
 
+</a>
 
-# 👾 2.3 Malware Detection
+
+
+</a>
+
+
+
+<a name="malw">
+
+# 👾 Malware Detection
 
 Succesfully stops almost all my malware, here is the list of patterns currently detected:
 
@@ -93,4 +127,6 @@ System calls are not detected because they bypass libraries or function as well 
 
 Btw advanced malware may evade hooks if it manually manipulates memory and threads in unconventional ways    : (
 
+
+</a>
 
