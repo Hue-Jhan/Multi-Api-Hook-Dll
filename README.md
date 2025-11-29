@@ -51,7 +51,7 @@ This project includes not only the hook dll, but also a starter file and some ma
 
 <a name="Howto">
 
-### 2.1 How to use
+### 📕 How to use
 
 Here's how to use the tools once you compile them:
 
@@ -92,7 +92,11 @@ In the release i also included some malware samples you can try, they are comple
 
 <a name="expl">
   
-### 2.2 Code in details
+### 🔍 Code in details
+
+aaa
+
+
 
 
 </a>
