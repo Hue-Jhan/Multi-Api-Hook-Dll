@@ -1,34 +1,61 @@
 # Multi Api Hook Dll
-Simple Antivirus DLL that when injected into a malware will hook WinApi and Native api functions through minook, track suspicious patterns and stop potentially malicious code. 
+Simple Antivirus DLL that when injected into a malware will hook WinApi and Native api functions through minook, track suspicious patterns and stop potentially malicious code; currently focused on Windows x64. 
 
-Successfully detects most of my malware, such as [this](), [this](), [this](), and [this](), but because it operates at usermode it cannot detect syscall injections, raw syscall tracking would require kernel-mode instrumentation which i cant do, maybe in the future.
-
-Currently focused on Windows x64. 
+Successfully detects most of my malware, such as [this](), [this](), [this](), and [this](), but because it operates at usermode it cannot detect syscall injections, raw syscall tracking would require kernel-mode instrumentation which i cant do.
 
 # ⚓ Hooks
 
-The DLL applies hooks with minhook to a wide range of functions at both the WinAPI and Native API (Nt/Zw) level, including but not limited to:
+### How to use
 
-- Memory management: VirtualAlloc, VirtualAllocEx, VirtualProtect, VirtualProtectEx, WriteProcessMemory, memcpy
-- Threading: CreateThread, CreateRemoteThread, NtResumeThread, NtSetContextThread, SuspendThread
-- Module loading: LoadLibraryA/W, LdrLoadDll, GetProcAddress
-- Networking: connect, WSAConnect, send, recv, WinHttpSendRequest, SSL_write/SSL_read (optional)
--Other suspicious behaviors tracked via system call equivalents to these functions
+Here's how to use the tools once you compile them:
 
-Each hook logs function parameters, memory addresses, and patterns such as RWX allocations, thread hijacking, and remote module injection. Some hooks also block execution if malicious behavior is detected.
+1) Use the ```starter.exe``` file to start a malware as a suspended process with ```./starter.exe malware.exe```, do not close the console;
+2) Inject the Dll into the malware and wait until all the hooks are placed (couple of seconds);
+3) Launch the process that the malware will target (if necessary);
+4) Go back to the starter console and press Enter to resume the malware;
+5) Get hacked (xd).
+
+You can inject the dll in various ways, the simplest one in my opinion is to use Process hacker 2 (not the latest version known as System Informer), to do this simply open ProcHack, find the malware (harmless bc in a suspended state), right click, misc, inject dll. You can alternatively use a custom injector but this is imo the fastest way. Some Antiviruses might remove ProcHacker so add it to the exceptions if necessary. 
+
+Most malware in their initial stage act as remote process injectors, they target softwares with AV/Edr exceptions or sometimes well known processes that are usually not suspicious and always active like explorer.exe or some windows internal services. All the malware samples in the zip file are process injectors that target notepad and inject shellcode (or a dll) that pops up a simple messagebox saying "xd". 
+
+If you want to hook a DLL you can too, the ```dll-inj-xd.exe``` or whatever i named it is a simple remote dll injector that uses LoadLibraryA to inject a dll that acts as a self injector, targeting the process it's being loaded into to inject shellcode and pop up a msgbox. In order to hook it you must first spawn the malware as suspended, then spawn the targetes process (notepad), hook it with procHacker, then hook the injector too (in case you wanna hook them both), and resume it. The hook dll will recognize and stop the injector first (but you can choose not to stop the execution), then it will stop the malicious dll inside notepad, you can choose not to stop the injection here too.
+
+
+### Hooks explained
+Hooks basically allow the DLL to intercept calls before the target function executes, when a hooked API is called, control is redirected to a custom detour function, which can inspect arguments, analyze behavior, log events, or block execution. Specifically, MinHook performs inline hooking by rewriting the first bytes of a target function with a jump instruction (trampoline). The original bytes are preserved in a function so the hook can safely pass execution back to the real API after processing.
+
+This DLL applies hooks with minhook to a wide range of functions at both the WinAPI and their Native API (Nt/Zw) counterpart (E.g VirtualAlloc -> NtAllocateVirtualMemory), including but not limited to:
+
+- Memory allocation: VirtualAlloc, VirtualAllocEx, VirtualProtect, VirtualProtectEx;
+  
+- Memory management: WriteProcessMemory, Memcpy, Manual copying;
+  
+- Threading: CreateThread, CreateRemoteThread, NtResumeThread, NtSetContextThread, SuspendThread;
+  
+- Module/Dll loading: LoadLibraryA/W, LdrLoadDll, GetProcAddress, Manual Mapping;
+  
+- And many more, for the full list check out ```nt_hooks.cpp``` and ```hook_stuff.cpp```.
+  
+Each nt hook also logs function parameters, memory addresses, and patterns such as RWX allocations, thread hijacking, and remote module injection. Some hooks also block execution if malicious behavior is detected.
 
 # 💻 Code
-The code is divided into several sections:
+This project includes not only the hook dll, but also a starter file and some malware samples you can try.
 
-- hook_stuff.cpp / hook_stuff.h:
+The starter file is a very simple executable that given an executable it will start it as a suspended process, then by pressing enter the process will resume. In my opinion this starter file is fundamental to properly hook all functions before execution.
+
+The code for the hook is divided into several sections:
+
+- dll_main.cpp: entry point and hook installer using MinHook, installs all hooks when the DLL is injected and resizes console;
+
+- hook_stuff.cpp / hook_stuff.h: Contains the hooks for the WinApi functions, i also included some Advapi and User32 functions, you can add the ones you like;
   
-- nt_hooks.cpp / nt_hooks.h: Contains the hooks for Ntdll/WinAPI functions. The majority of detection logic resides here. Functions include memory allocation, thread manipulation, module loading, and more.
+- nt_hooks.cpp / nt_hooks.h: Contains the hooks for Ntdll/WinAPI functions, the majority of the detection logic resides here.
 
-- detection.cpp / detection.h: This is the core detection engine, contains the functions that monitor memory protections, log RWX or suspicious executable regions, flags thread hijacking attempts and injection chains.
+- detection.cpp / detection.h: This is the core detection engine, contains the functions that monitor memory protections, RWX or suspicious executable regions, thread hijacking attempts and injection chains.
 
-- log_stuff.cpp / log_stuff.h: utility functions, logging helpers (LOGFUNC, Push...Event), color-coded console output, timestamp helpers, and bounded memory copies for safe logging of suspicious buffers.
+- log_stuff.cpp / log_stuff.h: utility functions, logging helpers (LOGFUNC, Push...Event), color coded console output, timestamp helpers, and bounded memory copies for safe logging of suspicious buffers (mostly shellcode).
 
-- dll_main.cpp: entry point and hook installer using MinHook, installs all hooks when the DLL is injected and ensures the original functions are called safely if execution is allowed.
 
 # 👾 Malware Detection
 
