@@ -152,37 +152,30 @@ The same thing applies for **native api** functions, but they require many struc
 
       if (Argument && find_alloc_for_addr((uintptr_t)Argument, &ai, targetPid) && ai.tag.find("potential_dll_path") != std::string::npos) {
          PushInjectionEvent("DLL INJECTION DETECTED", (LPVOID)ai.base, ai.size, 0, (void*)_ReturnAddress()); suspect = true;
-      } else if (Argument) {   // else try to read argument from the target process to see if its a path
-         char buf[512] = { 0 }; SIZE_T bytesRead = 0; g_enableLogging = false;
+      } else if (Argument) {
+         // else try to read argument from the target process to see if its a path
          HANDLE h = (targetPid == GetCurrentProcessId()) ? GetCurrentProcess() : OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, targetPid);
-         g_enableLogging = true;
          if (h) {
             if (ReadProcessMemory(h, Argument, buf, sizeof(buf) - 1, &bytesRead) && bytesRead > 0) {
                if (looks_like_ascii_path(buf, bytesRead) || looks_like_wide_path(buf, bytesRead)) {
-                  suspect = true;
                   PushInjectionEvent("DLL INJECTION DETECTED", Argument, bytesRead, 0, (void*)_ReturnAddress()); } }
                if (h != GetCurrentProcess()) CloseHandle(h); }
-      }
-   }
+   }  }
    ```
 
    The second case is similar but StartRoutine is inside ntdll.dll, it means it's likely LdrLoadDll injection:
 
    ```
    else if (_wcsicmp(modName.c_str(), L"ntdll.dll") == 0) {
-      bool ldrLikely = false;     // if its ntdll then it might be ldrloadlib
       if (Argument) {
-         char buf[512] = { 0 }; g_enableLogging = false; SIZE_T br = 0;
+         ...
          HANDLE h = (targetPid == GetCurrentProcessId()) ? GetCurrentProcess() : OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, targetPid);
-         g_enableLogging = true;
          if (h) {
             if (ReadProcessMemory(h, Argument, buf, sizeof(buf) - 1, &br) && br > 0) {
                if (looks_like_ascii_path(buf, br) || looks_like_wide_path(buf, br)) {
-                  suspect = true; PushInjectionEvent("DLL INJECTION (LdrLoadDll)", Argument, 0, 0, (void*)_ReturnAddress()); }
-            }
+                  PushInjectionEvent("DLL INJECTION (LdrLoadDll)", Argument, 0, 0, (void*)_ReturnAddress()); } }
             if (h != GetCurrentProcess()) CloseHandle(h);
-         }
-      }
+      }  }
    ```
 
    The third case is similar but StartRoutine is inside a tracked RX allocation, the region had writes and was made executable, and the thread starts inside it within a small time window, this indicates a possible manual mapping injection:
@@ -190,12 +183,11 @@ The same thing applies for **native api** functions, but they require many struc
    ```
    } else {    // then it might be inside an executable region of the target that matches a tracked allocation, manual mapping
       AllocInfo ai;
+
       if (find_alloc_for_addr((uintptr_t)StartRoutine, &ai, targetPid)) {
          uint64_t now = GetTickCount64();
          if (ai.written && ai.madeExecutable && (now - ai.ts) <= DETECTION_WINDOW_MS) {
-            suspect = true;
-            PushInjectionEvent("INJECTION CHAIN DETECTED (start inside tracked RX alloc)", (LPVOID)ai.base, ai.size, 0, (void*)_ReturnAddress()); }
-      }
+            suspect = true; PushInjectionEvent("INJECTION CHAIN DETECTED (start inside tracked RX alloc)", (LPVOID)ai.base, ai.size, 0, (void*)_ReturnAddress()); } }
    }
    ```
 
@@ -226,17 +218,38 @@ The same thing applies for **native api** functions, but they require many struc
       if (blockExecution()) return STATUS_ACCESS_VIOLATION; }
    ```
 
-Now let's go in depth to what all the detection related functions (located in ```detection.cpp```) do. First of all
+Now let's go in depth to what all the **detection related functions** and values do (located in ```detection.h/detection.cpp```). Sometimes mutex locks are used to allow concurrent readers (shared locks) or exclusive writers and to prevent races when multiple threads inspect/modify stuff.
 
+- ```g_allocs``` is the allocation table keyed by allocation base address, each AllocInfo describes an allocation (size, initial protection, written, made executable, owner PID, tag, timestamp, etc.), and is used to correlate allocate → write → make-exec → run. 
 
+- ```g_thread_states``` tracks recent thread operations keyed by a handle (cast to an integer), it's used to correlate suspend/get/set/resume sequences for hijack detection.
 
+- ```record_alloc()```: creates a new AllocInfo entry when an allocation is observed, but ignores zero base or very small allocations
 
+- ```find_alloc_for_addr()```: lookup which tracked allocation (if any) contains a given absolute address by using a shared lock on g_allocs (so many lookups can run concurrently). Specifically, it iterates g_allocs, returns the first allocation with this same address, if out is provided, copies the AllocInfo into it.
 
+- ```mark_written()```: marks tracked allocation as having been written to (copy/write) using an exclusive lock on g_allocs. It Finds the allocation that contains addr and sets a.written = true and updates a.ts = now_ms().
 
+- ```mark_exec()```: marks tracked allocation as having been changed to executable by checking newProt low byte to see if it is one of the executable protections.
+
+- ```check_thread_start()```: main "correlation point" for thread start, it's called when a thread is created or resumed pointing at startAddr, it returns true if a detection path is triggered.
+  First it finds allocation that covers startAddr, if none returns false. Then it check timing and state and only continues if ```a.madeExecutable && a.written```, if not (or not within a certain time) returns false.
+
+   If allocation has tags it will push a INJECTION DETECTED event depending on the type, and it will produce a useful memory dump, specifically it will dump from startAddr (the thread IP) if it lies inside the allocation (to capture the executed shellcode rather than headers), if not, or if that fails and the allocation is a potential_pe, it will read early headers and parse PE entry RVA. If entry RVA is present, it dumps from ```base + PeEntryPoint``` or from the allocation base.
+
+- ```record_thread_suspend_handle()```: stores an entry in g_thread_states with action = Suspended and timestamp. 
+
+- ```record_thread_getcontext_handle()```: updates the thread's record to GotContext with fresh timestamp.
+
+- ```record_thread_setcontext_handle()```: sets action = SetContext, records ts and the newIp, then checks if the newIp falls within a tracked allocation, if so, and if that allocation was written and made executable recently, emits SUSPICIOUS THREAD ACTIVITY.
+  
+- ```record_thread_resume_handle()```: if the sequence indicates a hijack, this function will create the final THREAD HIJACK DETECTED event and try to dump memory. First it finds entry for threadHandle, if not found, returns false. Then it checks the time window possible and that the last recorded action is SetContext. After this it will resolve the ownerPid of the thread via GetProcessIdOfThread, if it fails, falls back to current process ID.
+
+  Then it finds an allocation for the startAddr and alerts if the rip points to a tracked allocation of the target process. If ```a.written && a.madeExecutable``` and the time window is right, it will push a THREAD HIJACK DETECTED event, call read_and_hexdump_region on the allocation (bounded by DUMP_LIMIT) and log the result.
+
+  Finally it removes the allocation from g_allocs under exclusive lock to avoid duplicate alerts and returns true to indicate detection.
 
 </a>
-
-
 
 </a>
 
