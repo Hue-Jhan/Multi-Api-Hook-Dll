@@ -365,31 +365,6 @@ bool remote_module_by_addr(DWORD pid, uintptr_t addr, std::wstring& outModuleNam
     return found;
 }
 
-uintptr_t get_remote_module_base(DWORD pid, const char* moduleName) {
-    if (pid == 0) return 0;
-    wchar_t moduleNameW[MAX_PATH] = { 0 };
-    MultiByteToWideChar(CP_ACP, 0, moduleName, -1, moduleNameW, MAX_PATH);
-
-    g_enableLogging = false;
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
-    if (snap == INVALID_HANDLE_VALUE) {
-        g_enableLogging = true;
-        return 0; }
-
-    MODULEENTRY32W me;
-    me.dwSize = sizeof(me);
-    uintptr_t base = 0;
-    if (Module32FirstW(snap, &me)) {
-        do {
-            if (_wcsicmp(me.szModule, moduleNameW) == 0) {
-                base = (uintptr_t)me.modBaseAddr;
-                break;
-            }
-        } while (Module32NextW(snap, &me)); }
-    CloseHandle(snap);
-    g_enableLogging = true;
-    return base;
-}
 DWORD resolve_pid_from_handle(HANDLE hProc) {
     DWORD pid = 0;
     g_enableLogging = false;
