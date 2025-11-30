@@ -46,14 +46,14 @@ Each nt hook also logs function parameters, memory addresses, and patterns such 
 
 <a name="code">
 
-# 💻 Code
+# 2 💻 Code
 
 This project includes not only the hook dll, but also a starter file and some malware samples you can try.
 
 
 <a name="Howto">
 
-### 📕 How to use
+### 2.1 📕 How to use
 
 Here's how to use the tools once you compile the starter and the hook (with [minhook VC17](https://github.com/TsudaKageyu/minhook/tree/master/build) library in a ```lib``` folder):
 
@@ -79,9 +79,9 @@ The code for the hook is divided into these sections. The 2 images below are an 
 
 - ```dll_main.cpp```: entry point and hook installer using MinHook, installs all hooks when the DLL is injected and resizes console;
 
-- ```hook_stuff.cpp / hook_stuff.h```: Contains the hooks for the WinApi functions, i also included some Advapi and User32 functions, you can add the ones you like;
+- ```hook_stuff.cpp / hook_stuff.h```: Contains the hooks for the WinApi functions, i also included some Advapi and User32 functions, you can add any function/library you need;
   
-- ```nt_hooks.cpp / nt_hooks.h```: Contains the hooks for Ntdll/WinAPI functions, the majority of the detection logic resides here.
+- ```nt_hooks.cpp / nt_hooks.h```: Contains the hooks for Ntdll functions + the necessary structs, and the majority of the detection logic.
 
 - ```detection.cpp / detection.h```: This is the core detection engine, contains the functions that monitor memory protections, RWX or suspicious executable regions, thread hijacking attempts and injection chains.  <img align="right" src="media/huk-nt-hijak-find.png" width="350" />
 
@@ -98,9 +98,138 @@ In the future i will add more samples that include methodes queue Apc, callback 
 
 <a name="expl">
   
-### 🔍 Code in details
+### 2.2 🔍 Code in details
+Here i will explain how hooks are performed, how hooked function implement detection utilities, and how those utilities work, first let's take a look at the **Hooking** logic:
 
-aaa
+1) First define the struct that will hold the function signature you want to hook: ```typedef HMODULE(WINAPI* LoadLibraryA_t)(LPCSTR);```.
+
+2) Then the global function pointer that will store the original unhooked API: ```LoadLibraryA_t fpLoadLibraryA = nullptr;```.
+
+3) Then write the hooked function ```HMODULE WINAPI hkLoadLibraryA(LPCSTR name) {``` with the exact same signature, but introducing the logging part ```LOGFUNC("LoadLibraryA", "name=%s", name);``` and the pointer to the original ```return fpLoadLibraryA(name); }```.
+
+4) Finally setup the hook with minhook libary: ```SetupHook(hKernel32, "LoadLibraryA", (void**)&fpLoadLibraryA, hkLoadLibraryA);```.
+
+The same thing applies for **native api** functions, but they require many structs to work. Native api hooks also performs detection logic before calling the real function via the original pointer. They are located in ```nt_hooks.cpp```, here are the utilities that the nt functions use to detect malicious patterns: 
+
+1) ***Memory Allocation***: detects when memory is allocated with execution privileges and records every allocation in a tracker (hashmap).
+   ```
+   if (IsRWX(Protect)) PushRWXEvent("NtAllocateVirtualMemory", BaseAddress, size, Protect, _ReturnAddress());
+   if (NT_SUCCESS(st)) record_alloc((uintptr_t)*BaseAddress, size, Protect, GetCurrentThreadId(), GetProcessId(ProcessHandle), "NtAllocateVirtualMemory");
+   ```
+
+2) ***Memory protection*** change: logs rrx/rwx/rx/r transitions and marks allocations as executable for correlation with writes.
+   ```
+   if (IsRWX(NewProtect)) PushRWXEvent("NtProtectVirtualMemory", BaseAddress, size, NewProtect, _ReturnAddress());
+   NTSTATUS st = NtProtectVirtualMemory(ProcessHandle, BaseAddress, RegionSize, NewProtect, OldProtect);
+   if (NT_SUCCESS(st)) mark_exec((uintptr_t)addr, size, NewProtect);
+   ```
+   
+3) ***Memory write/copying***: detects samples the first 4 KB to detect (PE headers, ASCII paths, UTF-16 paths) and tags the allocation accordingly, useful for detecting dll injection w/wo manual mapping.
+   ```
+   if (isPE || isAsciiPath || isWidePath) {
+        AllocInfo a;
+        if (find_alloc_for_addr((uintptr_t)BaseAddress, &a)) {
+            std::unique_lock<std::shared_mutex> L(g_allocs_lock);
+            auto it = g_allocs.find(a.base);
+            if (it != g_allocs.end()) {
+                if (isPE) it->second.tag += "|potential_pe";
+                if (isAsciiPath || isWidePath) it->second.tag += "|potential_dll_path";
+    }   }   }
+
+   NTSTATUS st = NtWriteVirtualMemory(ProcessHandle, BaseAddress, Buffer, NumberOfBytesToWrite, NumberOfBytesWritten);
+   if (NT_SUCCESS(st)) mark_written((uintptr_t)BaseAddress, NumberOfBytesToWrite);
+   ```
+
+4) ***Thread creation***: complex hook, implements multiple injection detection cases, first it determine target PID, then it resolves the module name of StartRoutine.
+   ```
+      if (remote_module_by_addr(targetPid, (uintptr_t)StartRoutine, modName)) {
+   ```
+   
+   It has 3 cases, in the first one startRoutine is inside kernel32.dll/kernelbase.dll, the argument contains a readable ASCII/WIDE DLL path in remote memory or the allocation is tagged as potential_dll_path, which means it's likely a classic LoadLibrary-based DLL injection.
+   ```
+      if (_wcsicmp(modName.c_str(), L"kernel32.dll") == 0 || _wcsicmp(modName.c_str(), L"kernelbase.dll") == 0) {
+            AllocInfo ai;       // check if the thread was already tracked, and has a dll path tag
+
+            if (Argument && find_alloc_for_addr((uintptr_t)Argument, &ai, targetPid) && ai.tag.find("potential_dll_path") != std::string::npos) {
+                PushInjectionEvent("DLL INJECTION DETECTED", (LPVOID)ai.base, ai.size, 0, (void*)_ReturnAddress()); suspect = true;
+            } else if (Argument) {   // else try to read argument from the target process to see if its a path
+                char buf[512] = { 0 }; SIZE_T bytesRead = 0; g_enableLogging = false;
+                HANDLE h = (targetPid == GetCurrentProcessId()) ? GetCurrentProcess() : OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, targetPid);
+                g_enableLogging = true;
+                if (h) {
+                    if (ReadProcessMemory(h, Argument, buf, sizeof(buf) - 1, &bytesRead) && bytesRead > 0) {
+                        if (looks_like_ascii_path(buf, bytesRead) || looks_like_wide_path(buf, bytesRead)) {
+                            suspect = true;
+                            PushInjectionEvent("DLL INJECTION DETECTED", Argument, bytesRead, 0, (void*)_ReturnAddress()); } }
+                    if (h != GetCurrentProcess()) CloseHandle(h); }
+      }   }
+   ```
+   The second case is similar but StartRoutine is inside ntdll.dll, it means it's likely LdrLoadDll injection:
+   ```
+      else if (_wcsicmp(modName.c_str(), L"ntdll.dll") == 0) {
+         bool ldrLikely = false;     // if its ntdll then it might be ldrloadlib
+         if (Argument) {
+            char buf[512] = { 0 }; g_enableLogging = false; SIZE_T br = 0;
+            HANDLE h = (targetPid == GetCurrentProcessId()) ? GetCurrentProcess() : OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, targetPid);
+            g_enableLogging = true;
+            if (h) {
+               if (ReadProcessMemory(h, Argument, buf, sizeof(buf) - 1, &br) && br > 0) {
+                  if (looks_like_ascii_path(buf, br) || looks_like_wide_path(buf, br)) {
+                     suspect = true;
+                     PushInjectionEvent("DLL INJECTION (LdrLoadDll)", Argument, 0, 0, (void*)_ReturnAddress());
+               }  }
+               if (h != GetCurrentProcess()) CloseHandle(h);
+         }   }
+   ```
+
+   or
+   
+        } else {    // then it might be inside an executable region of the target that matches a tracked allocation, manual mapping
+            AllocInfo ai;
+            // printf("weird\n");
+            if (find_alloc_for_addr((uintptr_t)StartRoutine, &ai, targetPid)) {
+                uint64_t now = GetTickCount64();
+                if (ai.written && ai.madeExecutable && (now - ai.ts) <= DETECTION_WINDOW_MS) {
+                    suspect = true;
+                    PushInjectionEvent("INJECTION CHAIN DETECTED (start inside tracked RX alloc)", (LPVOID)ai.base, ai.size, 0, (void*)_ReturnAddress()); } }
+    }   }
+
+    if (suspect && targetPid == GetCurrentProcessId()) {
+        if (blockExecution()) return STATUS_ACCESS_VIOLATION;
+    } else if (suspect) {
+        if (blockExecution()) return STATUS_ACCESS_VIOLATION; }
+
+    if (check_thread_start((uintptr_t)StartRoutine, GetCurrentThreadId())) {
+        if (blockExecution()) return STATUS_ACCESS_VIOLATION; }
+
+    NTSTATUS st = NtCreateThreadEx(ThreadHandle, DesiredAccess, ObjectAttributes, ProcessHandle, StartRoutine, Argument, CreateFlags, ZeroBits, StackSize, MaximumStackSize, AttributeList);
+   ```
+
+This is how you detect the “allocate → write → make executable → run” malware chain
+ 
+5) ***Thread manipulation***:
+   ```
+      record_thread_suspend_handle(ThreadHandle);
+   ```
+   
+   and
+   
+   #ifdef _WIN64
+       uintptr_t newIp = ThreadContext ? (uintptr_t)ThreadContext->Rip : 0;
+   #else
+       uintptr_t newIp = ThreadContext ? (uintptr_t)ThreadContext->Eip : 0;
+   #endif
+       record_thread_setcontext_handle(ThreadHandle, newIp);
+   
+   and
+   
+   if (record_thread_resume_handle(ThreadHandle)) {
+           if (blockExecution()) return STATUS_ACCESS_VIOLATION;
+           // if (blockExecutionWithMsgBox()) return STATUS_ACCESS_VIOLATION; }
+       }
+
+Detection logic:
+
 
 
 
@@ -115,7 +244,7 @@ aaa
 
 <a name="malw">
 
-# 👾 Malware Detection
+# 3. 👾 Malware Detection
 
 Succesfully stops almost all my malware, here is the list of patterns currently detected:
 
