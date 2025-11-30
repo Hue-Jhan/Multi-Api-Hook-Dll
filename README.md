@@ -18,7 +18,7 @@ Successfully detects most of my malware, such as [this](https://github.com/Hue-J
 
 
 
-# ⚓ Hooks
+# ⚓ 1 - Hooks
 
 Hooks basically allow the DLL to intercept calls before the target function executes, when a hooked API is called, control is redirected to a custom detour function, which can inspect arguments, analyze behavior, log events, or block execution. Specifically, MinHook performs inline hooking by rewriting the first bytes of a target function with a jump instruction (trampoline). The original bytes are preserved in a function so the hook can safely pass execution back to the real API after processing. Here's an example of detecting [this](https://github.com/Hue-Jhan/Thread-Hijacking-Collection/tree/main/2_Create_Hijack) ---> <img align="right" src="media/huk-hijak-cr0.png" width="313" />
 
@@ -46,14 +46,14 @@ Each nt hook also logs function parameters, memory addresses, and patterns such 
 
 <a name="code">
 
-# 2 💻 Code
+# 💻 2 - Code
 
 This project includes not only the hook dll, but also a starter file and some malware samples you can try.
 
 
 <a name="Howto">
 
-### 2.1 📕 How to use
+### 📕 2.1 - How to use
 
 Here's how to use the tools once you compile the starter and the hook (with [minhook VC17](https://github.com/TsudaKageyu/minhook/tree/master/build) library in a ```lib``` folder):
 
@@ -103,7 +103,7 @@ In the future i will add more samples that include methodes queue Apc, callback 
 
 <details style="margin-bottom: 1px;" >
    
-<summary><h1> 2.2 🔍 Code in details... </h2></summary>
+<summary><h1> 🔍 2.2 - Code in details (click here) </h2></summary>
   <p align="left">
 
 Here i will explain how hooks are performed, how hooked function implement detection utilities, and how those utilities work, first let's take a look at the **Hooking** logic:
@@ -240,9 +240,9 @@ Now let's go in depth to what all the **detection related functions** and values
 - ```mark_exec()```: marks tracked allocation as having been changed to RWX by checking newProt low byte to see if it is one of the executable protections.
 
 - ```check_thread_start()```: core function to detect thread starts, it's called when a thread is created or resumed pointing at startAddr, it returns true if a detection path is triggered.
-  It first checks if the startAddr falls within a tracked allocation, else returns false. If the allocation is made executable and has been written to (```a.madeExecutable && a.written```), the function proceeds with correlation checks
+  It first checks if the startAddr falls within a tracked allocation, else returns false. If the allocation is made executable and has been written to (a.madeExecutable && a.written), the function proceeds with correlation checks
 
-   If allocation has tags it will push a INJECTION DETECTED event depending on the type, and it will attempt to dump the memory from startAddr (if the address is inside the allocation) to capture the executed shellcode rather than headers, or it will parse the PE entry point. If the PE entry point is found, it will dump the memory starting from ```base + PeEntryPoint```.
+   If allocation has tags it will push a INJECTION DETECTED event depending on the type, and it will attempt to dump the memory from startAddr (if the address is inside the allocation) to capture the executed shellcode rather than headers, or it will parse the PE entry point. If the PE entry point is found, it will dump the memory starting from base + PeEntryPoint.
 
 - ```record_thread_suspend_handle()```: records the thread's suspension event in g_thread_states, sets the action to Suspended and logs the timestamp.
 
@@ -271,7 +271,7 @@ Now let's go in depth to what all the **detection related functions** and values
 
 <a name="malw">
 
-# 3. 👾 Malware Detection
+# 👾 3 - Malware Detection
 
 Succesfully stops almost all my malware, here is the list of patterns currently detected:
 
