@@ -101,7 +101,7 @@ In the future i will add more samples that include methodes queue Apc, callback 
 
 <details style="margin-bottom: 1px;" >
    
-<summary><h1> 🔍 2.2 - Code in details (click here) </h2></summary>
+<summary><h1> 🔍 2.2 - Code in details (click here to expand) </h2></summary>
   <p align="left">
 
 Here i will explain how hooks are performed, how hooked function implement detection utilities, and how those utilities work, first let's take a look at the **Hooking** logic:
