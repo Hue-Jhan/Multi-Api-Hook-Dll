@@ -142,93 +142,93 @@ The same thing applies for **native api** functions, but they require many struc
 
 4) ***Thread creation***: complex hook, implements multiple injection detection cases, first it determine target PID, then it resolves the module name of StartRoutine.
    ```
-      if (remote_module_by_addr(targetPid, (uintptr_t)StartRoutine, modName)) {
+   if (remote_module_by_addr(targetPid, (uintptr_t)StartRoutine, modName)) {
    ```
    
    It has 3 cases, in the first one startRoutine is inside kernel32.dll/kernelbase.dll, the argument contains a readable ASCII/WIDE DLL path in remote memory or the allocation is tagged as potential_dll_path, which means it's likely a classic LoadLibrary-based DLL injection.
    ```
-      if (_wcsicmp(modName.c_str(), L"kernel32.dll") == 0 || _wcsicmp(modName.c_str(), L"kernelbase.dll") == 0) {
-            AllocInfo ai;       // check if the thread was already tracked, and has a dll path tag
+   if (_wcsicmp(modName.c_str(), L"kernel32.dll") == 0 || _wcsicmp(modName.c_str(), L"kernelbase.dll") == 0) {
+      AllocInfo ai;       // check if the thread was already tracked, and has a dll path tag
 
-            if (Argument && find_alloc_for_addr((uintptr_t)Argument, &ai, targetPid) && ai.tag.find("potential_dll_path") != std::string::npos) {
-                PushInjectionEvent("DLL INJECTION DETECTED", (LPVOID)ai.base, ai.size, 0, (void*)_ReturnAddress()); suspect = true;
-            } else if (Argument) {   // else try to read argument from the target process to see if its a path
-                char buf[512] = { 0 }; SIZE_T bytesRead = 0; g_enableLogging = false;
-                HANDLE h = (targetPid == GetCurrentProcessId()) ? GetCurrentProcess() : OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, targetPid);
-                g_enableLogging = true;
-                if (h) {
-                    if (ReadProcessMemory(h, Argument, buf, sizeof(buf) - 1, &bytesRead) && bytesRead > 0) {
-                        if (looks_like_ascii_path(buf, bytesRead) || looks_like_wide_path(buf, bytesRead)) {
-                            suspect = true;
-                            PushInjectionEvent("DLL INJECTION DETECTED", Argument, bytesRead, 0, (void*)_ReturnAddress()); } }
-                    if (h != GetCurrentProcess()) CloseHandle(h); }
-      }   }
+      if (Argument && find_alloc_for_addr((uintptr_t)Argument, &ai, targetPid) && ai.tag.find("potential_dll_path") != std::string::npos) {
+         PushInjectionEvent("DLL INJECTION DETECTED", (LPVOID)ai.base, ai.size, 0, (void*)_ReturnAddress()); suspect = true;
+      } else if (Argument) {   // else try to read argument from the target process to see if its a path
+         char buf[512] = { 0 }; SIZE_T bytesRead = 0; g_enableLogging = false;
+         HANDLE h = (targetPid == GetCurrentProcessId()) ? GetCurrentProcess() : OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, targetPid);
+         g_enableLogging = true;
+         if (h) {
+            if (ReadProcessMemory(h, Argument, buf, sizeof(buf) - 1, &bytesRead) && bytesRead > 0) {
+               if (looks_like_ascii_path(buf, bytesRead) || looks_like_wide_path(buf, bytesRead)) {
+                  suspect = true;
+                  PushInjectionEvent("DLL INJECTION DETECTED", Argument, bytesRead, 0, (void*)_ReturnAddress()); } }
+               if (h != GetCurrentProcess()) CloseHandle(h); }
+      }
+   }
    ```
+
    The second case is similar but StartRoutine is inside ntdll.dll, it means it's likely LdrLoadDll injection:
+
    ```
-      else if (_wcsicmp(modName.c_str(), L"ntdll.dll") == 0) {
-         bool ldrLikely = false;     // if its ntdll then it might be ldrloadlib
-         if (Argument) {
-            char buf[512] = { 0 }; g_enableLogging = false; SIZE_T br = 0;
-            HANDLE h = (targetPid == GetCurrentProcessId()) ? GetCurrentProcess() : OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, targetPid);
-            g_enableLogging = true;
-            if (h) {
-               if (ReadProcessMemory(h, Argument, buf, sizeof(buf) - 1, &br) && br > 0) {
-                  if (looks_like_ascii_path(buf, br) || looks_like_wide_path(buf, br)) {
-                     suspect = true;
-                     PushInjectionEvent("DLL INJECTION (LdrLoadDll)", Argument, 0, 0, (void*)_ReturnAddress());
-               }  }
-               if (h != GetCurrentProcess()) CloseHandle(h);
-         }   }
+   else if (_wcsicmp(modName.c_str(), L"ntdll.dll") == 0) {
+      bool ldrLikely = false;     // if its ntdll then it might be ldrloadlib
+      if (Argument) {
+         char buf[512] = { 0 }; g_enableLogging = false; SIZE_T br = 0;
+         HANDLE h = (targetPid == GetCurrentProcessId()) ? GetCurrentProcess() : OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, targetPid);
+         g_enableLogging = true;
+         if (h) {
+            if (ReadProcessMemory(h, Argument, buf, sizeof(buf) - 1, &br) && br > 0) {
+               if (looks_like_ascii_path(buf, br) || looks_like_wide_path(buf, br)) {
+                  suspect = true; PushInjectionEvent("DLL INJECTION (LdrLoadDll)", Argument, 0, 0, (void*)_ReturnAddress()); }
+            }
+            if (h != GetCurrentProcess()) CloseHandle(h);
+         }
+      }
    ```
 
-   or
+   The third case is similar but StartRoutine is inside a tracked RX allocation, the region had writes and was made executable, and the thread starts inside it within a small time window, this indicates a possible manual mapping injection:
    
-        } else {    // then it might be inside an executable region of the target that matches a tracked allocation, manual mapping
-            AllocInfo ai;
-            // printf("weird\n");
-            if (find_alloc_for_addr((uintptr_t)StartRoutine, &ai, targetPid)) {
-                uint64_t now = GetTickCount64();
-                if (ai.written && ai.madeExecutable && (now - ai.ts) <= DETECTION_WINDOW_MS) {
-                    suspect = true;
-                    PushInjectionEvent("INJECTION CHAIN DETECTED (start inside tracked RX alloc)", (LPVOID)ai.base, ai.size, 0, (void*)_ReturnAddress()); } }
-    }   }
-
-    if (suspect && targetPid == GetCurrentProcessId()) {
-        if (blockExecution()) return STATUS_ACCESS_VIOLATION;
-    } else if (suspect) {
-        if (blockExecution()) return STATUS_ACCESS_VIOLATION; }
-
-    if (check_thread_start((uintptr_t)StartRoutine, GetCurrentThreadId())) {
-        if (blockExecution()) return STATUS_ACCESS_VIOLATION; }
-
-    NTSTATUS st = NtCreateThreadEx(ThreadHandle, DesiredAccess, ObjectAttributes, ProcessHandle, StartRoutine, Argument, CreateFlags, ZeroBits, StackSize, MaximumStackSize, AttributeList);
+   ```
+   } else {    // then it might be inside an executable region of the target that matches a tracked allocation, manual mapping
+      AllocInfo ai;
+      if (find_alloc_for_addr((uintptr_t)StartRoutine, &ai, targetPid)) {
+         uint64_t now = GetTickCount64();
+         if (ai.written && ai.madeExecutable && (now - ai.ts) <= DETECTION_WINDOW_MS) {
+            suspect = true;
+            PushInjectionEvent("INJECTION CHAIN DETECTED (start inside tracked RX alloc)", (LPVOID)ai.base, ai.size, 0, (void*)_ReturnAddress()); }
+      }
+   }
    ```
 
-This is how you detect the “allocate → write → make executable → run” malware chain
+   
+   This is how it detects the allocate → write → make executable → run malware chain. In the end, if suspect==true blocks execution:
+   ```
+   if (suspect && targetPid == GetCurrentProcessId()) {
+      if (blockExecution()) return STATUS_ACCESS_VIOLATION;
+
+   if (check_thread_start((uintptr_t)StartRoutine, GetCurrentThreadId())) {
+      if (blockExecution()) return STATUS_ACCESS_VIOLATION; }
+    ```
  
 5) ***Thread manipulation***:
-   ```
-      record_thread_suspend_handle(ThreadHandle);
-   ```
-   
-   and
-   
-   #ifdef _WIN64
-       uintptr_t newIp = ThreadContext ? (uintptr_t)ThreadContext->Rip : 0;
-   #else
-       uintptr_t newIp = ThreadContext ? (uintptr_t)ThreadContext->Eip : 0;
-   #endif
-       record_thread_setcontext_handle(ThreadHandle, newIp);
-   
-   and
-   
-   if (record_thread_resume_handle(ThreadHandle)) {
-           if (blockExecution()) return STATUS_ACCESS_VIOLATION;
-           // if (blockExecutionWithMsgBox()) return STATUS_ACCESS_VIOLATION; }
-       }
+   Records thread suspension to correlate later: ```record_thread_suspend_handle(ThreadHandle); ```
 
-Detection logic:
+   Tracks where a thread’s instruction pointer (Rip/Eip) is moved:
+
+   ```
+   uintptr_t newIp = ThreadContext ? (uintptr_t)ThreadContext->Rip : 0;
+   record_thread_setcontext_handle(ThreadHandle, newIp);
+   ```
+
+   Detects suspend → write → setcontext → resume thread hijacking chains.
+
+   ```
+   if (record_thread_resume_handle(ThreadHandle)) {
+      if (blockExecution()) return STATUS_ACCESS_VIOLATION; }
+   ```
+
+Now let's go in depth to what all the detection related functions (located in ```detection.cpp```) do. First of all
+
+
 
 
 
