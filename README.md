@@ -97,8 +97,15 @@ In the future i will add more samples that include methodes queue Apc, callback 
 
 
 <a name="expl">
-  
-### 2.2 🔍 Code in details
+
+######  ⬇  clicca il titolo per visualizzare la sezione / ⬇ click each section to view its content
+
+
+<details style="margin-bottom: 1px;" >
+   
+<summary><h1> 2.2 🔍 Code in details... </h2></summary>
+  <p align="left">
+
 Here i will explain how hooks are performed, how hooked function implement detection utilities, and how those utilities work, first let's take a look at the **Hooking** logic:
 
 1) First define the struct for the function signature to hook: ```typedef HMODULE(WINAPI* LoadLibraryA_t)(LPCSTR);```.
@@ -218,7 +225,7 @@ The same thing applies for **native api** functions, but they require many struc
       if (blockExecution()) return STATUS_ACCESS_VIOLATION; }
    ```
 
-Now let's go in depth to what all the **detection related functions** and values do (located in ```detection.h/detection.cpp```). Sometimes mutex locks are used to allow concurrent readers (shared locks) or exclusive writers and to prevent races when multiple threads inspect/modify stuff.
+Now let's go in depth to what all the **detection related functions** and values do (located in ```detection.h/detection.cpp```). Sometimes mutex locks are used to allow concurrent readers (shared locks) or exclusive writers and to prevent races when multiple threads inspect/modify stuff. Here are the most important functions:
 
 - ```g_allocs``` is the allocation table keyed by allocation base address, each AllocInfo describes an allocation (size, initial protection, written, made executable, owner PID, tag, timestamp, etc.), and is used to correlate allocate → write → make-exec → run. 
 
@@ -226,33 +233,40 @@ Now let's go in depth to what all the **detection related functions** and values
 
 - ```record_alloc()```: creates a new AllocInfo entry when an allocation is observed, but ignores zero base or very small allocations
 
-- ```find_alloc_for_addr()```: lookup which tracked allocation (if any) contains a given absolute address by using a shared lock on g_allocs (so many lookups can run concurrently). Specifically, it iterates g_allocs, returns the first allocation with this same address, if out is provided, copies the AllocInfo into it.
+- ```find_alloc_for_addr()```: does a lookup in the g_allocs table to find an allocation that contains the provided address. If a matching allocation is found, it copies the AllocInfo into the out parameter (if provided) and returns true. It uses a shared lock to allow multiple threads to perform multiple lookups at the same time without interfering with each other.
 
-- ```mark_written()```: marks tracked allocation as having been written to (copy/write) using an exclusive lock on g_allocs. It Finds the allocation that contains addr and sets a.written = true and updates a.ts = now_ms().
+- ```mark_written()```: marks tracked allocation as having been written to using an exclusive lock on g_allocs to ensure that only one thread can modify the state of an allocation at a time. It Finds the allocation that contains the addr, sets a.written = true and updates the timestamp (ts) to the current time.
 
-- ```mark_exec()```: marks tracked allocation as having been changed to executable by checking newProt low byte to see if it is one of the executable protections.
+- ```mark_exec()```: marks tracked allocation as having been changed to RWX by checking newProt low byte to see if it is one of the executable protections.
 
-- ```check_thread_start()```: main "correlation point" for thread start, it's called when a thread is created or resumed pointing at startAddr, it returns true if a detection path is triggered.
-  First it finds allocation that covers startAddr, if none returns false. Then it check timing and state and only continues if ```a.madeExecutable && a.written```, if not (or not within a certain time) returns false.
+- ```check_thread_start()```: core function to detect thread starts, it's called when a thread is created or resumed pointing at startAddr, it returns true if a detection path is triggered.
+  It first checks if the startAddr falls within a tracked allocation, else returns false. If the allocation is made executable and has been written to (```a.madeExecutable && a.written```), the function proceeds with correlation checks
 
-   If allocation has tags it will push a INJECTION DETECTED event depending on the type, and it will produce a useful memory dump, specifically it will dump from startAddr (the thread IP) if it lies inside the allocation (to capture the executed shellcode rather than headers), if not, or if that fails and the allocation is a potential_pe, it will read early headers and parse PE entry RVA. If entry RVA is present, it dumps from ```base + PeEntryPoint``` or from the allocation base.
+   If allocation has tags it will push a INJECTION DETECTED event depending on the type, and it will attempt to dump the memory from startAddr (if the address is inside the allocation) to capture the executed shellcode rather than headers, or it will parse the PE entry point. If the PE entry point is found, it will dump the memory starting from ```base + PeEntryPoint```.
 
-- ```record_thread_suspend_handle()```: stores an entry in g_thread_states with action = Suspended and timestamp. 
+- ```record_thread_suspend_handle()```: records the thread's suspension event in g_thread_states, sets the action to Suspended and logs the timestamp.
 
-- ```record_thread_getcontext_handle()```: updates the thread's record to GotContext with fresh timestamp.
+- ```record_thread_getcontext_handle()```: same thing but sets the action to GotContext.
 
-- ```record_thread_setcontext_handle()```: sets action = SetContext, records ts and the newIp, then checks if the newIp falls within a tracked allocation, if so, and if that allocation was written and made executable recently, emits SUSPICIOUS THREAD ACTIVITY.
+- ```record_thread_setcontext_handle()```: records a SetContext action in g_thread_states and checks if the new IP (newIp) falls within a recently written and executable tracked allocation. If so, it flags this as suspicious thread activity. The newIp is updated in the thread's state to track the potential hijack.
   
-- ```record_thread_resume_handle()```: if the sequence indicates a hijack, this function will create the final THREAD HIJACK DETECTED event and try to dump memory. First it finds entry for threadHandle, if not found, returns false. Then it checks the time window possible and that the last recorded action is SetContext. After this it will resolve the ownerPid of the thread via GetProcessIdOfThread, if it fails, falls back to current process ID.
+- ```record_thread_resume_handle()```: if the sequence indicates a hijack, this function will create the final THREAD HIJACK DETECTED event and try to dump memory. It first confirms that the thread handle has been recorded, then checks that the last recorded action was SetContext and within an appropriate time window. Then it verifies if the newIp points to a tracked allocation that has been both written to and made executable recently. If so, it pushes a THREAD HIJACK DETECTED event, calls read_and_hexdump_region on the allocation (bounded by DUMP_LIMIT) and logs the result. Finally it removes the allocation from g_allocs under exclusive lock to avoid duplicate alerts and returns true to indicate detection.
 
-  Then it finds an allocation for the startAddr and alerts if the rip points to a tracked allocation of the target process. If ```a.written && a.madeExecutable``` and the time window is right, it will push a THREAD HIJACK DETECTED event, call read_and_hexdump_region on the allocation (bounded by DUMP_LIMIT) and log the result.
+- ```remote_module_by_addr()```: looks up which loaded module (DLL/EXE) contains the given address addr in the process pid. It walks through all modules using Module32FirstW and Module32NextW, comparing addr with the module's base address (modBaseAddr) and size (modBaseSize). If a match is found, it returns the module name in outModuleName
 
-  Finally it removes the allocation from g_allocs under exclusive lock to avoid duplicate alerts and returns true to indicate detection.
+- ```read_and_hexdump_region()```: reads up to wantSize bytes of memory from a remote process (ownerPid) starting at base but is limited by dumpLimit. It uses VirtualQuery(Ex) to gather memory region information (only readable committed memory is accessed). Then it reads the memory in chunks based on page boundaries and tries to dump as much data as possible without exceeding toDump. Finally calls hexdump_mem() to print the memory dump.
+
+- ```parse_pe_entry_rva()```: parses the headers of a potential PE file from the beginning of the provided buffer. It checks for the "PE\0\0" signature in the DOS header, reads the e_lfanew offset and the OptionalHeader.Magic to distinguish between PE32 and PE32+ formats. It then extracts the AddressOfEntryPoint (RVA) from the optional header and returns it, but if the buffer is too small or the structure doesn't match a PE file, it returns 0.
+
+
+
+  </p>
+  
+</details>
 
 </a>
 
 </a>
-
 
 
 <a name="malw">
