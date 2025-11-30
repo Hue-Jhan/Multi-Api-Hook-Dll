@@ -20,7 +20,7 @@ Successfully detects most of my malware, such as [this](https://github.com/Hue-J
 
 # ⚓ Hooks
 
-Hooks basically allow the DLL to intercept calls before the target function executes, when a hooked API is called, control is redirected to a custom detour function, which can inspect arguments, analyze behavior, log events, or block execution. Specifically, MinHook performs inline hooking by rewriting the first bytes of a target function with a jump instruction (trampoline). The original bytes are preserved in a function so the hook can safely pass execution back to the real API after processing. Here's an example of detecting [this](https://github.com/Hue-Jhan/Thread-Hijacking-Collection/tree/main/2_Create_Hijack) ---> <img align="right" src="media/huk-hijak-cr0.png" width="310" />
+Hooks basically allow the DLL to intercept calls before the target function executes, when a hooked API is called, control is redirected to a custom detour function, which can inspect arguments, analyze behavior, log events, or block execution. Specifically, MinHook performs inline hooking by rewriting the first bytes of a target function with a jump instruction (trampoline). The original bytes are preserved in a function so the hook can safely pass execution back to the real API after processing. Here's an example of detecting [this](https://github.com/Hue-Jhan/Thread-Hijacking-Collection/tree/main/2_Create_Hijack) ---> <img align="right" src="media/huk-hijak-cr0.png" width="313" />
 
 This DLL applies hooks with minhook to a wide range of functions at both the WinAPI and their Native API (Nt/Zw) counterpart (E.g VirtualAlloc -> NtAllocateVirtualMemory), including but not limited to:
 
@@ -31,7 +31,7 @@ This DLL applies hooks with minhook to a wide range of functions at both the Win
   
 - Threading: CreateThread, CreateRemoteThread, NtResumeThread, NtSetContextThread, SuspendThread;
   
-- Module/Dll loading: LoadLibraryA/W, LdrLoadDll, GetProcAddress, Manual Mapping; <img align="right" src="media/huk-hijak-cr1.png" width="310" />
+- Module/Dll loading: LoadLibraryA/W, LdrLoadDll, GetProcAddress, Manual Mapping; <img align="right" src="media/huk-hijak-cr1.png" width="313" />
 
 - File manipulation: CreateFileA/W, and more, useful in case a dll/persistence file is dropped;
 
@@ -83,7 +83,7 @@ The code for the hook is divided into these sections. The 2 images below are an 
   
 - ```nt_hooks.cpp / nt_hooks.h```: Contains the hooks for Ntdll functions + the necessary structs, and the majority of the detection logic.
 
-- ```detection.cpp / detection.h```: This is the core detection engine, contains the functions that monitor memory protections, RWX or suspicious executable regions, thread hijacking attempts and injection chains.  <img align="right" src="media/huk-nt-hijak-find.png" width="350" />
+- ```detection.cpp / detection.h```: This is the core detection engine, contains the functions that monitor memory protections, RWX or suspicious executable regions, thread hijacking attempts and injection chains.  <img align="right" src="media/huk-nt-hijak-find.png" width="380" />
 
 - ```log_stuff.cpp / log_stuff.h```: utility functions, logging helpers (LOGFUNC, Push...Event), color coded console output, timestamp helpers, and bounded memory copies for safe logging of suspicious buffers (mostly shellcode).
 
@@ -101,9 +101,9 @@ In the future i will add more samples that include methodes queue Apc, callback 
 ### 2.2 🔍 Code in details
 Here i will explain how hooks are performed, how hooked function implement detection utilities, and how those utilities work, first let's take a look at the **Hooking** logic:
 
-1) First define the struct that will hold the function signature you want to hook: ```typedef HMODULE(WINAPI* LoadLibraryA_t)(LPCSTR);```.
+1) First define the struct for the function signature to hook: ```typedef HMODULE(WINAPI* LoadLibraryA_t)(LPCSTR);```.
 
-2) Then the global function pointer that will store the original unhooked API: ```LoadLibraryA_t fpLoadLibraryA = nullptr;```.
+2) Then the function pointer that will store the original unhooked api: ```LoadLibraryA_t fpLoadLibraryA = nullptr```.
 
 3) Then write the hooked function ```HMODULE WINAPI hkLoadLibraryA(LPCSTR name) {``` with the exact same signature, but introducing the logging part ```LOGFUNC("LoadLibraryA", "name=%s", name);``` and the pointer to the original ```return fpLoadLibraryA(name); }```.
 
@@ -117,7 +117,7 @@ The same thing applies for **native api** functions, but they require many struc
    if (NT_SUCCESS(st)) record_alloc((uintptr_t)*BaseAddress, size, Protect, GetCurrentThreadId(), GetProcessId(ProcessHandle), "NtAllocateVirtualMemory");
    ```
 
-2) ***Memory protection*** change: logs rrx/rwx/rx/r transitions and marks allocations as executable for correlation with writes.
+2) ***Memory protection***: logs rrx/rwx/rx/r transitions and marks allocations as executable for correlation with writes.
    ```
    if (IsRWX(NewProtect)) PushRWXEvent("NtProtectVirtualMemory", BaseAddress, size, NewProtect, _ReturnAddress());
    NTSTATUS st = NtProtectVirtualMemory(ProcessHandle, BaseAddress, RegionSize, NewProtect, OldProtect);
@@ -210,7 +210,7 @@ The same thing applies for **native api** functions, but they require many struc
     ```
  
 5) ***Thread manipulation***:
-   Records thread suspension to correlate later: ```record_thread_suspend_handle(ThreadHandle); ```
+   Records suspensions to correlate later: ```record_thread_suspend_handle(tHandle); ```
 
    Tracks where a thread’s instruction pointer (Rip/Eip) is moved:
 
@@ -252,7 +252,7 @@ Succesfully stops almost all my malware, here is the list of patterns currently 
 
 - **Memory injection**: VirtualAlloc(Ex) + VirtualWrite/Memcpy/WriteProcessMem + RWX + CreateThread(Ex): Same as before but the program directly creates a thread in the target process that points to the previously allocated shellcode, or it may create a suspended one that points to a dummy function, then change its RIP and resume it instantly. 
 
-- **DLL Injection**: VirtualAlloc(Ex) + VirtualWrite/Memcpy/WriteProcessMem/Manual + GetModuleHandleW + GetProcAddr(loading function) or LoadLibrary(A/W/ExA/ExW)/LdrLoadLibrary/Manual Mapping + CreateThread(Ex): If the program starts a thread with a StartRoutine in a known library (kernel32 for LoadLibrary, ntdll for LdrLoadLib), or with an Argument that looks like a dll, or in a previously tracked memory, the dll will flag this pattern, analyze it and stop it if necessary. (example in the image below). <img align="right" src="media/huk-injector-loadlib.png" width="380" />
+- **DLL Injection**: VirtualAlloc(Ex) + VirtualWrite/Memcpy/WriteProcessMem/Manual + GetModuleHandleW + GetProcAddr(loading function) or LoadLibrary(A/W/ExA/ExW)/LdrLoadLibrary/Manual Mapping + CreateThread(Ex): If the program starts a thread with a StartRoutine in a known library (kernel32 for LoadLibrary, ntdll for LdrLoadLib), or with an Argument that looks like a dll, or in a previously tracked memory, the dll will flag this pattern, analyze it and stop it if necessary. (example in the image below). <img align="right" src="media/huk-injector-loadlib.png" width="400" />
 
 - **DLL Hijacking**: work in progress, i will update this after i created a good dll hijacker..... 
 
