@@ -51,7 +51,6 @@ bool looks_like_pe(const void* buf, SIZE_T len);
 bool looks_like_ascii_path(const void* buf, SIZE_T len);
 bool looks_like_wide_path(const void* buf, SIZE_T len);
 
-uintptr_t get_remote_module_base(DWORD pid, const char* moduleName);
 DWORD resolve_pid_from_handle(HANDLE hProc);
 bool remote_module_by_addr(DWORD pid, uintptr_t addr, std::wstring& outModuleName);
 
