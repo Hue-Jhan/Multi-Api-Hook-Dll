@@ -6,7 +6,7 @@ Successfully detects most of my malware, such as [this](https://github.com/Hue-J
 1. [⚓ Hooks explained](#hooks)
 2. [💻 Code](#code)
    
-   2.1 [Project Structure](#Howto)
+   2.1 [How to use & Project Structure](#Howto)
    
    2.2 [In Depth Explanation](#expl)
    
@@ -53,7 +53,7 @@ This project includes not only the hook dll, but also a starter file and some ma
 
 <a name="Howto">
 
-### 📕 2.1 - How to use
+### 2.1 - How to use
 
 Here's how to use the tools once you compile the starter and the hook (with [minhook VC17](https://github.com/TsudaKageyu/minhook/tree/master/build) library in a ```lib``` folder):
 
@@ -69,11 +69,9 @@ Most malware in their initial stage act as remote process injectors, they target
 
 If you want to hook a DLL you can too, the ```dll-inj-xd.exe``` or whatever i named it is a simple remote dll injector that uses LoadLibraryA to inject a dll that acts as a self injector, targeting the process it's being loaded into to inject shellcode and pop up a msgbox. In order to hook it you must first spawn the malware as suspended, then spawn the targetes process (notepad), hook it with procHacker, then hook the injector too (in case you wanna hook them both), and resume it. The hook dll will recognize and stop the injector first (but you can choose not to stop the execution), then it will stop the malicious dll inside notepad, you can choose not to stop the injection here too.
 
-#### Starter File 
-The starter file is a very simple executable that given an executable it will start it as a suspended process, then by pressing enter the process will resume. In my opinion this starter file is fundamental to properly hook all functions before execution and to avoid race conditions. You can try to hook the malware while it's running but it might crash or simply already have done some damage.
+The **starter file** is a very simple executable that given an executable it will start it as a suspended process, then by pressing enter the process will resume. In my opinion this starter file is fundamental to properly hook all functions before execution and to avoid race conditions. You can try to hook the malware while it's running but it might crash or simply already have done some damage.
 
-#### Hook Dll
-The code for the hook is divided into these sections. The 2 images below are an example of the hook detecting [this](https://github.com/Hue-Jhan/Ntdll-Thread-Hijacking-trojan).
+The code for the **hook** is divided into these sections. The 2 images below are an example of the hook detecting [this](https://github.com/Hue-Jhan/Ntdll-Thread-Hijacking-trojan).
 
 <img align="right" src="media/huk-nt-hijak-find2.png" width="500" />
 
