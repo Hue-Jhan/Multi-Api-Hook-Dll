@@ -117,20 +117,20 @@ Here i will explain how hooks are performed, how hooked function implement detec
 The same thing applies for **native api** functions, but they require many structs to work. Native api hooks also performs detection logic before calling the real function via the original pointer. They are located in ```nt_hooks.cpp```, here are the utilities that the nt functions use to detect malicious patterns: 
 
 1) ***Memory Allocation***: detects when memory is allocated with execution privileges and records every allocation in a tracker (hashmap).
-   ```
+   ```cpp
    if (IsRWX(Protect)) PushRWXEvent("NtAllocateVirtualMemory", BaseAddress, size, Protect, _ReturnAddress());
    if (NT_SUCCESS(st)) record_alloc((uintptr_t)*BaseAddress, size, Protect, GetCurrentThreadId(), GetProcessId(ProcessHandle), "NtAllocateVirtualMemory");
    ```
 
 2) ***Memory protection***: logs rrx/rwx/rx/r transitions and marks allocations as executable for correlation with writes.
-   ```
+   ```cpp
    if (IsRWX(NewProtect)) PushRWXEvent("NtProtectVirtualMemory", BaseAddress, size, NewProtect, _ReturnAddress());
    NTSTATUS st = NtProtectVirtualMemory(ProcessHandle, BaseAddress, RegionSize, NewProtect, OldProtect);
    if (NT_SUCCESS(st)) mark_exec((uintptr_t)addr, size, NewProtect);
    ```
    
 3) ***Memory write/copying***: detects samples the first 4 KB to detect (PE headers, ASCII paths, UTF-16 paths) and tags the allocation accordingly, useful for detecting dll injection w/wo manual mapping.
-   ```
+   ```cpp
    if (isPE || isAsciiPath || isWidePath) {
         AllocInfo a;
         if (find_alloc_for_addr((uintptr_t)BaseAddress, &a)) {
@@ -146,31 +146,28 @@ The same thing applies for **native api** functions, but they require many struc
    ```
 
 4) ***Thread creation***: complex hook, implements multiple injection detection cases, first it determine target PID, then it resolves the module name of StartRoutine.
-   ```
+   ```cpp
    if (remote_module_by_addr(targetPid, (uintptr_t)StartRoutine, modName)) {
    ```
    
    It has 3 cases, in the first one startRoutine is inside kernel32.dll/kernelbase.dll, the argument contains a readable ASCII/WIDE DLL path in remote memory or the allocation is tagged as potential_dll_path, which means it's likely a classic LoadLibrary-based DLL injection.
-   ```
+   ```cpp
    if (_wcsicmp(modName.c_str(), L"kernel32.dll") == 0 || _wcsicmp(modName.c_str(), L"kernelbase.dll") == 0) {
       AllocInfo ai;       // check if the thread was already tracked, and has a dll path tag
 
       if (Argument && find_alloc_for_addr((uintptr_t)Argument, &ai, targetPid) && ai.tag.find("potential_dll_path") != std::string::npos) {
          PushInjectionEvent("DLL INJECTION DETECTED", (LPVOID)ai.base, ai.size, 0, (void*)_ReturnAddress()); suspect = true;
-      } else if (Argument) {
-         // else try to read argument from the target process to see if its a path
+      } else if (Argument) {   // try to read arg from target process to see if its a path
          HANDLE h = (targetPid == GetCurrentProcessId()) ? GetCurrentProcess() : OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, targetPid);
          if (h) {
             if (ReadProcessMemory(h, Argument, buf, sizeof(buf) - 1, &bytesRead) && bytesRead > 0) {
                if (looks_like_ascii_path(buf, bytesRead) || looks_like_wide_path(buf, bytesRead)) {
-                  PushInjectionEvent("DLL INJECTION DETECTED", Argument, bytesRead, 0, (void*)_ReturnAddress()); } }
-               if (h != GetCurrentProcess()) CloseHandle(h); }
-   }  }
+                  PushInjectionEvent("DLL INJECTION DETECTED", Argument, bytesRead, 0, (void*)_ReturnAddress()); }  }  }  }  }
    ```
 
    The second case is similar but StartRoutine is inside ntdll.dll, it means it's likely LdrLoadDll injection:
 
-   ```
+   ```cpp
    else if (_wcsicmp(modName.c_str(), L"ntdll.dll") == 0) {
       if (Argument) {
          ...
@@ -185,7 +182,7 @@ The same thing applies for **native api** functions, but they require many struc
 
    The third case is similar but StartRoutine is inside a tracked RX allocation, the region had writes and was made executable, and the thread starts inside it within a small time window, this indicates a possible manual mapping injection:
    
-   ```
+   ```cpp
    } else {    // then it might be inside an executable region of the target that matches a tracked allocation, manual mapping
       AllocInfo ai;
 
@@ -198,7 +195,7 @@ The same thing applies for **native api** functions, but they require many struc
 
    
    This is how it detects the allocate → write → make executable → run malware chain. In the end, if suspect==true blocks execution:
-   ```
+   ```cpp
    if (suspect && targetPid == GetCurrentProcessId()) {
       if (blockExecution()) return STATUS_ACCESS_VIOLATION;
 
@@ -211,14 +208,14 @@ The same thing applies for **native api** functions, but they require many struc
 
    Tracks where a thread’s instruction pointer (Rip/Eip) is moved:
 
-   ```
+   ```cpp
    uintptr_t newIp = ThreadContext ? (uintptr_t)ThreadContext->Rip : 0;
    record_thread_setcontext_handle(ThreadHandle, newIp);
    ```
 
    Detects suspend → write → setcontext → resume thread hijacking chains.
 
-   ```
+   ```cpp
    if (record_thread_resume_handle(ThreadHandle)) {
       if (blockExecution()) return STATUS_ACCESS_VIOLATION; }
    ```
