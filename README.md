@@ -3,13 +3,14 @@ Simple Antivirus DLL that when injected into a malware will hook WinApi and Nati
 
 Successfully detects most of my malware, such as [this](https://github.com/Hue-Jhan/Self-Injection-Reverse-Shell-Undetected), [this](https://github.com/Hue-Jhan/Encrypted-Trojan-Undetected), [this](https://github.com/Hue-Jhan/Local-Process-injection-Trojan), [this](https://github.com/Hue-Jhan/Remote-Dll-injector-Trojan), [this](https://github.com/Hue-Jhan/Ntdll-Process-inj-Trojan), [this](https://github.com/Hue-Jhan/Thread-Hijacking-Collection), [this](https://github.com/Hue-Jhan/Ntdll-Dll-Injection-Trojan) and [this](https://github.com/Hue-Jhan/Ntdll-Thread-Hijacking-trojan), but because it operates at usermode it cannot detect syscall injections (like [this](https://github.com/Hue-Jhan/Direct-Syscall-Process-Injection-Trojan) or [this](https://github.com/Hue-Jhan/Direct-Syscall-Dll-Injection)) since raw syscall tracking would require kernel-mode instrumentation which i cant do.
 
+**Index**:
+
 1. [⚓ Hooks explained](#hooks)
 2. [💻 Code](#code)
    
    2.1 [How to use & Project Structure](#Howto)
    
-   2.2 [In Depth Explanation](#expl)
-   
+   2.2 [In Depth Explanation](#expl)  
 4. [👾 Malware Detection](#malw)
 
 
